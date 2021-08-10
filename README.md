@@ -1,3 +1,2 @@
 # CIFDP
-Coastal Inundation Forecast Demostration Project (CIFDP)
-High Resolution Inundation Forecast
+Coastal Inundation Forecast Demostration Project (CIFDP). A High Resolution Inundation Forecast
