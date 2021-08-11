@@ -1,0 +1,60 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funder: Korea                                                         ##
+## Manager: WMO                                                          ##
+## Implementer: SPC                                                      ##
+###########################################################################
+## Authors: Herve Damlamian (based on Cyprien Bosserelle 2017 release)   ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+## Project background:  Korea and managed by WMO                         ##
+###########################################################################
+## Description:                                                          ##
+## Extract_ForecastSLA_HYCOM inlcudes the following components:          ##
+## 1) Download SSH value from HYCOM forecast                             ##
+## 2) Compute Sea Level Anomaly based on analysis of hindcast            ##
+## The mean SSH over 20years was computed based on Moritz Wandres Code   ##
+## 3) Create a SLA file for each site based on Nowcast SLA value         ##
+###########################################################################
+
+#We define the start and end date (UTC) of the forecast formatted as per HYCOM server requirement
+startdate=$(awk '{if(NR==1) {split($1,time,"/");printf("%s-%s-%sT%s",substr(time[1],1,4),substr(time[1],5,2),substr(time[1],7,2),substr(time[1],10,2))}}' Lastcycle.txt)
+#enddate=$(awk '{if(NR==1) {split($1,time,"/");printf("%s-%s-%sT%s",substr(time[2],1,4),substr(time[2],5,2),substr(time[2],7,2),substr(time[2],10,2))}}' Lastcycle.txt)
+a=$(echo ${startdate} | awk '{split($0,tp,"T"); print tp[2]}')
+tempHr=`echo "$a+3" |bc`
+enddate=$(awk '{if(NR==1) {split($1,time,"/");printf("%s-%s-%sT",substr(time[1],1,4),substr(time[1],5,2),substr(time[1],7,2))}}' Lastcycle.txt)
+
+# Define offshore location to extract the SLA for each inundation site 
+LONS=(177.4399 177.5200 177.6799 177.7600)
+LATS=(-18.1599 -18.2000 -18.2000 -18.2399)
+NAMES=(Cuvu Korotogo Maui_Bay Komave)
+
+#As the system is set to provide 7-day wave forecast, we loop through 180 hrs. Note that we use 3-hourly forcings to reduce download need and time
+# This could be changed to hourly (by replacing the below with "for i in $(seq 0 1 180)") especially during cyclone condition.
+# 3-hourly wave/wind forcings is deemed adequate for project objective: Swell inundation forecast
+
+
+#Define the region to download
+leftlonreg=177.0
+rightlonreg=178.0
+toplatreg=-17.5
+botlatreg=-18.5
+
+#Download the Global wind forecast for the region of interest from the High resolution gfs
+###### Warning: Over the recent years NOAA has made sveral changs to their forecast products which led to system breakdown. 
+###### If the system fails - the first check is to ensure the URLs below (row 67 and row87) are still valid
+#HD - Last URL change on 23/03/2021
+var=`echo "https://ncss.hycom.org/thredds/ncss/GLBy0.08/latest?var=surf_el&north=${toplatreg}&west=${leftlonreg}&east=${rightlonreg}&south=${botlatreg}&disableProjSubset=on&horizStride=1&time_start=${startdate}%3A00%3A00Z&time_end=${enddate}${tempHr}%3A00%3A00Z&timeStride=1&vertStride=1&addLatLon=true&accept=netcdf4"`
+echo ${var}
+aria2c --allow-overwrite=true -c $var -o SLA.nc
+
+for i in $(seq 1 1 4)
+do
+	indx=`echo "$i-1" |bc`
+	echo $indx
+		grd2xyz SLA.nc?surf_el[0] >SLA.dat
+		echo ${LONS[$indx]}
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.01) && $1<(lon+0.01) && ($2<lat+0.01) && ($2>lat-0.01)){printf("%f\n",$3)}}' SLA.dat> ${NAMES[$indx]}_SLA.dat
+done

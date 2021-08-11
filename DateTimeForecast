@@ -1,0 +1,48 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funder: Korea                                                         ##
+## Manager: WMO                                                          ##
+## Implementer: SPC                                                      ##
+###########################################################################
+## Authors: Cyprien Bosserelle (Updated Herve Damlamian)                 ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+###########################################################################
+## Description:                                                          ##
+## DateTimeForecast:                                                     ##
+##      1) Create relevant timestamp for the run                         ##
+##      2) Create output folder for the forecast run                     ##
+###########################################################################
+product_path_log=`awk -F'[<>]' '/ProductOutPath/ {print $3}' config_path.xml`
+# Set up variables that will define which file is the latest global forecast (in UTC)
+filedate=`date -d"4 hours ago" -u +"%Y%m%d"`
+Hcycle=`date -d"4 hours ago" -u +"%H"`
+echo $filedate
+echo $Hcycle
+# Global model runs every 6 hours / Here we get the closest forecast time
+Tcycle=`echo "$Hcycle/6*6" |bc|awk '{printf("%2.2i",$1)}'`
+
+echo $filedate $Tcycle
+
+forecastdate=`date -d"4 hours ago" -u +"%Y-%m-%d"`
+forecasttime=`echo "$forecastdate ${Tcycle}:00:00 UTC"`
+
+datecalstr=`echo "$forecasttime + 180 hours"`
+datecalplus=`echo "$forecasttime + 1 hours"`
+dateforecaststarts=`date -u --date="$forecasttime" +"%Y%m%d.%H%M%S"`
+FJTdateforecastst=`date -u --date="$forecasttime + 12 hours" +"%Y%m%d.%H%M%S"`
+
+dateforecastends=`date -u --date="$datecalstr" +"%Y%m%d.%H%M%S"`
+FJTdateforecastends=`date -u --date="$datecalstr + 12 hours" +"%Y%m%d.%H%M%S"`
+dateforecastplus=`date -u --date="$datecalplus" +"%Y%m%d.%H%M%S"`
+
+# IMPORTANT: Store time info of the forecast in a separate file. This is a key input file for all system components 
+echo "${dateforecaststarts}/${dateforecastends}" >Lastcycle.txt
+echo "${filedate} ${Tcycle}z" >>Lastcycle.txt
+echo "${FJTdateforecastst}/${FJTdateforecastends}" >>Lastcycle.txt
+
+#Create output folder name based on forecast time start in Fiji Time
+fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+mkdir $product_path_log/out/$fol

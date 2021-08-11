@@ -1,0 +1,81 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funder: Korea                                                         ##
+## Manager: WMO                                                          ##
+## Implementer: SPC                                                      ##
+###########################################################################
+## Authors: Herve Damlamian (based on Cyprien Bosserelle 2017 release)   ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+## Project background:  Korea and managed by WMO                         ##
+###########################################################################
+## Description:                                                          ##
+## RunForecast is the system's primary script calling the various system'##
+## components.                                                           ##
+## To run, simply open cygwin, go into the CIFDP folder and type:        ##
+## ./RunForecast                                                         ##
+###########################################################################
+
+#Function to check if there is a need to run new forecast
+function check(){
+	# Set up variables that will define which file is the latest global forecast (in UTC)
+	filedate=`date -d"4 hours ago" -u +"%Y%m%d"`
+	Hcycle=`date -d"4 hours ago" -u +"%H"`
+
+	# Global model runs every 6 hours / Here we get the closest forecast time
+	Tcycle=`echo "$Hcycle/6*6" |bc|awk '{printf("%2.2i",$1)}'`
+	forecastdate=`date -d"4 hours ago" -u +"%Y-%m-%d"`
+	forecasttime=`echo "$forecastdate ${Tcycle}:00:00 UTC"`
+	FJTdateforecastst=`date -u --date="$forecasttime + 12 hours" +"%Y%m%d.%H%M%S"`
+	#echo "${product_path_log}/out/${FJTdateforecastst}"
+	[ -d "${product_path_log}/out/${FJTdateforecastst}" ]
+}
+
+
+product_path_log=`awk -F'[<>]' '/ProductOutPath/ {print $3}' config_path.xml`
+while true
+do
+	#Create timestamp for the run
+	./DateTimeForecast
+	## Download global forcings, setup and run the downscaled wave model
+	./Run_FijiWave-Forecast_1
+	wait
+	# Process Wave model outputs into netcdf files
+	cd ./out/
+	./Conv_Swan2nc
+	wait
+	cd ..
+	#plot wave model outputs: 2D and 1D plots are generated
+	#nohup ./Run_plots_1 &
+	
+	#Run the RBF for all sites to forecast nearshore water level and potential inundation
+	./Run_RBF
+	wait
+	#plot wave model outputs: 2D and 1D plots are generated
+	./Run_plots_1
+	wait
+	#ensure swan.exe is killed
+	while ps -W | grep swan.exe
+	do
+		ps -W | grep swan.exe | awk '{print $1}' | while read line; do echo $line | xargs kill -f; done;
+	done
+	
+	#ensure GMT is killed
+	while ps -W | grep grdedit.exe
+	do
+		ps -W | grep grdedit.exe | awk '{print $1}' | while read line; do echo $line | xargs kill -f; done;
+	done
+	#ensure GMT is killed
+	while ps -W | grep grdmath.exe
+	do
+		ps -W | grep grdmath.exe | awk '{print $1}' | while read line; do echo $line | xargs kill -f; done;
+	done
+	#check if we need to run the forecast again
+	while check
+	do
+		echo "run already exists -  check again in 30mins"
+		sleep 30m
+	done
+done

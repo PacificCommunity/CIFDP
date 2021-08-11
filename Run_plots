@@ -1,0 +1,14 @@
+#!/bin/bash
+
+./plotMapsHs &
+./plotMapsL &
+./plotMapsTp &
+./plotMapsHswell &
+
+wait
+echo '2D plots completed'
+
+./plotforecast
+
+#Forecast Water level and produce graphs and maps
+./Run_ShoreWL-Forecast

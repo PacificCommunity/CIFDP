@@ -1,0 +1,231 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funder: Korea                                                         ##
+## Manager: WMO                                                          ##
+## Implementer: SPC                                                      ##
+###########################################################################
+## Authors: Cyprien Bosserelle, (updated by Herve Damlamian)             ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+###########################################################################
+## Description:                                                          ##
+## Run_FjiWave-Forecast aims to:                                         ##
+##      1) download forcings from global forecast model                  ##
+##      2) setup the downscaled wave model                               ##
+##      3) Run the SWAN wave model                                       ##
+##Note that the script also generate key inputs (e.g. LastCycle.txt) for ##
+##the other system's component                                           ##
+###########################################################################
+product_path_log=`awk -F'[<>]' '/ProductOutPath/ {print $3}' config_path.xml`
+
+fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+
+# Set up variables that will define which file is the latest global forecast (in UTC)
+filedate=$(awk '{if(NR==2) {split($1,date,"/");printf("%s",substr(date[1],1,8))}}' Lastcycle.txt)
+# Global model runs every 6 hours / Here we get the closest forecast time
+Tcycle=$(awk '{if(NR==2) {split($2,time,"/");printf("%s",substr(time[1],1,2))}}' Lastcycle.txt)
+
+echo $filedate $Tcycle
+
+# Here we create key timestamp that will be used to setup the wave model's start and end date/time
+forecastdate=$(awk '{if(NR==2) {split($1,date,"/");printf("%s-%s-%s",substr(date[1],1,4),substr(date[1],5,2),substr(date[1],7,2))}}' Lastcycle.txt)
+forecasttime=`echo "$forecastdate ${Tcycle}:00:00 UTC"`
+
+datecalstr=`echo "$forecasttime + 180 hours"`
+datecalplus=`echo "$forecasttime + 1 hours"`
+dateforecaststarts=`date -u --date="$forecasttime" +"%Y%m%d.%H%M%S"`
+FJTdateforecastst=`date -u --date="$forecasttime + 12 hours" +"%Y%m%d.%H%M%S"`
+
+dateforecastends=`date -u --date="$datecalstr" +"%Y%m%d.%H%M%S"`
+FJTdateforecastends=`date -u --date="$datecalstr + 12 hours" +"%Y%m%d.%H%M%S"`
+dateforecastplus=`date -u --date="$datecalplus" +"%Y%m%d.%H%M%S"`
+
+
+touch South_1.txt
+
+# Define locations along the SWAN wave model offshore boundaries where we create wave forcings from the global model
+LONS=(176.5 177.0 177.5 178.0 178.5 179.0 176.5 176.5 176.5 176.5 176.5 179.0 179.0 179.0 179.0 179.0)
+LATS=(-19.5 -19.5 -19.5 -19.5 -19.5 -19.5 -19.5 -19.0 -18.5 -18.0 -17.5 -19.5 -19.0 -18.5 -18.0 -17.5)
+NAMES=(South_1 South_2 South_3 South_4 South_5 South_6 West_1 West_2 West_3 West_4 West_5 East_1 East_2 East_3 East_4 East_5)
+
+#As the system is set to provide 7-day wave forecast, we loop through 180 hrs. Note that we use 3-hourly forcings to reduce download need and time
+# This could be changed to hourly (by replacing the below with "for i in $(seq 0 1 180)") especially during cyclone condition.
+# 3-hourly wave/wind forcings is deemed adequate for project objective: Swell inundation forecast
+for i in $(seq 0 3 180)
+do
+
+	echo $i
+	#tt=`printf "%2.2i" $i`
+	ttt=`printf "%3.3i" $i`
+	echo $Tcycle
+	#echo $tt
+	echo $ttt
+	#Define the region to download
+	leftlonreg=176.5
+	rightlonreg=179.0
+	toplatreg=-17.5
+	botlatreg=-19.5
+	
+	#Download the Global wind forecast for the region of interest from the High resolution gfs
+	###### Warning: Over the recent years NOAA has made sveral changs to their forecast products which led to system breakdown. 
+	###### If the system fails - the first check is to ensure the URLs below (row 67 and row87) are still valid
+	#HD - Last URL change on 23/03/2021
+	var=`echo "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25_1hr.pl?file=gfs.t"${Tcycle}"z.pgrb2.0p25.f"${ttt}"&lev_10_m_above_ground=on&var_UGRD=on&var_VGRD=on&subregion=&leftlon=${leftlonreg}&rightlon=${rightlonreg}&toplat=${toplatreg}&bottomlat=${botlatreg}&dir=%2Fgfs."${filedate}%2F${Tcycle}%2Fatmos""`
+	echo "$var"
+	#Download the wind data
+	until aria2c --auto-file-renaming=false --allow-overwrite=true -c $var -o Wind_tmp.grb2
+	do
+		echo download failed -  try again in 10seconds
+		sleep 10
+	done
+	#convert grib2 format into netcdf
+	wgrib2 Wind_tmp.grb2 -netcdf Wind_tmp.nc
+	#Generate wind model input (named wind.dat)
+	if [ "$i" = "0" ]; then
+		grd2xyz Wind_tmp.nc?UGRD_10maboveground -ZBLa|awk 'BEGIN{LB=11}{printf("%f\t",$1); if(NR==LB){LB=LB+11; printf("\n")}}'>Wind.dat
+		grd2xyz Wind_tmp.nc?VGRD_10maboveground -ZBLa|awk 'BEGIN{LB=11}{printf("%f\t",$1); if(NR==LB){LB=LB+11; printf("\n")}}'>>Wind.dat
+	else
+		grd2xyz Wind_tmp.nc?UGRD_10maboveground -ZBLa|awk 'BEGIN{LB=11}{printf("%f\t",$1); if(NR==LB){LB=LB+11; printf("\n")}}'>>Wind.dat
+		grd2xyz Wind_tmp.nc?VGRD_10maboveground -ZBLa|awk 'BEGIN{LB=11}{printf("%f\t",$1); if(NR==LB){LB=LB+11; printf("\n")}}'>>Wind.dat
+	fi
+
+
+	#Download the NOAA ww3 multi grid forecast for reion of interest
+	###### Warning: Over the recent years NOAA has made sveral changs to their forecast products which led to system breakdown. 
+	###### If the system fails - the first check is to ensure the URLs below (row 67 and row87) are still valid
+	#HD - Last URL change on 23/03/2021 (update due to NCEP wave_multi decommissioned)
+	
+	var=`echo "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfswave.pl?file=gfswave.t"${Tcycle}"z.global.0p25.f"${ttt}".grib2&var_DIRPW=on&var_HTSGW=on&var_PERPW=on&var_SWDIR=on&var_SWELL=on&var_SWPER=on&var_WVDIR=on&var_WVHGT=on&var_WVPER=on&subregion=&leftlon=${leftlonreg}&rightlon=${rightlonreg}&toplat=${toplatreg}&bottomlat=${botlatreg}&dir=%2Fgfs."${filedate}"%2F"${Tcycle}"%2Fwave%2Fgridded"`
+	echo $var
+	
+	#Download the wind data
+	until aria2c --auto-file-renaming=false --allow-overwrite=true -c $var -o tmp.grib2
+	do
+		echo download failed -  try again in 10seconds
+		sleep 10
+	done
+	
+	#Convert the grib2 format into netcdf
+	wgrib2 tmp.grib2 -netcdf tmp.nc
+	#Extract wave partitions in separate temporary TxT files
+	grd2xyz tmp.nc?SWELL_1insequence[0] >Hswell1tmp.txt
+	grd2xyz tmp.nc?SWDIR_1insequence[0] >Dswell1tmp.txt
+	grd2xyz tmp.nc?SWPER_1insequence[0] >Tswell1tmp.txt
+
+	grd2xyz tmp.nc?SWELL_2insequence[0] >Hswell2tmp.txt
+	grd2xyz tmp.nc?SWDIR_2insequence[0] >Dswell2tmp.txt
+	grd2xyz tmp.nc?SWPER_2insequence[0] >Tswell2tmp.txt
+
+	grd2xyz tmp.nc?WVHGT_surface[0] >Hwindtmp.txt
+	grd2xyz tmp.nc?WVDIR_surface[0] >Dwindtmp.txt
+	grd2xyz tmp.nc?WVPER_surface[0] >Twindtmp.txt
+
+
+	#For each timestep, each boundary points (16) and each wave partition (swell1, swell2,windwave), create the directional spectra (i.e. wave boundary forcing) 
+	for n in $(seq 1 1 16)
+	do
+
+		indx=`echo "$n-1" |bc`
+		#create jonswap spectrum for Primary swell
+		#touch jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("JONSWAP_OPERATIONAL_FILE\nSouth_1_sw1.txt\toutputfile\n%f\tHs\n",$3)}}' Hswell1tmp.txt> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("%f\tTp\n",$3)}}' Tswell1tmp.txt>> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("%f\tDir\n",$3)}}' Dswell1tmp.txt>> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){if($3>=10){printf("%3.0f\tSpread\n0.01\talpha\n1.25\tbeta\n3.3\tgamma\n",(($3-10)/10)*90+10)}else{printf("%3.0f\tSpread\n0.01\talpha\n1.25\tbeta\n3.3\tgamma\n",$3)}}}' Tswell1tmp.txt>> jonswap.dat
+
+		./JONSWAP.exe
+		#Convert jonswap wave spectra (freq / direction)to netcdf
+		xyz2grd South_1_sw1.txt -R0.04/0.315/0/359 -I0.0025/1.0 -GSwell1.nc
+
+
+		#create jonswap spectrum for Secondary swell
+		#touch jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("JONSWAP_OPERATIONAL_FILE\nSouth_1_sw2.txt\toutputfile\n%f\tHs\n",$3)}}' Hswell2tmp.txt> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("%f\tTp\n",$3)}}' Tswell2tmp.txt>> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("%f\tDir\n",$3)}}' Dswell2tmp.txt>> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){if($3>=10){printf("%3.0f\tSpread\n0.01\talpha\n1.25\tbeta\n3.3\tgamma\n",(($3-10)/10)*90+10)}else{printf("%3.0f\tSpread\n0.01\talpha\n1.25\tbeta\n3.3\tgamma\n",$3)}}}' Tswell2tmp.txt>> jonswap.dat
+
+		./JONSWAP.exe
+
+		#Convert jonswap wave spectra (freq / direction)to netcdf
+		xyz2grd South_1_sw2.txt -R0.04/0.315/0/359 -I0.0025/1.0 -GSwell2.nc
+
+		#create jonswap spectrum for Wind waves
+		#touch jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("JONSWAP_OPERATIONAL_FILE\nSouth_1_ww.txt\toutputfile\n%f\tHs\n",$3)}}' Hwindtmp.txt> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("%f\tTp\n",$3)}}' Twindtmp.txt>> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){printf("%f\tDir\n",$3)}}' Dwindtmp.txt>> jonswap.dat
+		awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} '{if($1>(lon-0.001) && $1<(lon+0.001) && ($2<lat+0.0001) && ($2>lat-0.001)){if($3>=10){printf("%3.0f\tSpread\n0.01\talpha\n1.25\tbeta\n1.1\tgamma\n",(($3-10)/10)*90+10)}else{printf("%3.0f\tSpread\n0.01\talpha\n1.25\tbeta\n1.1\tgamma\n",$3)}}}' Twindtmp.txt>> jonswap.dat
+
+		./JONSWAP.exe
+
+		#Convert jonswap wave spectra (freq / direction)to netcdf
+		xyz2grd South_1_ww.txt -R0.04/0.315/0/359 -I0.0025/1.0 -GWindWave.nc
+
+		#Combine the 3 directional spectra
+		grdmath Swell1.nc 0 AND = Swell1_N.nc
+		grdmath Swell2.nc 0 AND = Swell2_n.nc
+		grdmath WindWave.nc 0 AND = WindWave_N.nc
+		grdmath Swell1_N.nc Swell2_n.nc ADD WindWave_N.nc ADD = total_spec.nc
+
+		grd2xyz total_spec.nc -ZBLa > total_spec.txt
+
+		##Convert combined spectra into a SWAN spec input file
+		#First we define the timestamp in the relevant format
+		datecalstr=`echo "$forecasttime +$i hours"`
+		dateforecaststr=`date -u --date="$datecalstr" +"%Y%m%d.%H%M%S"`
+
+		echo $dateforecaststr
+		## thsi is where we format the directional wave spectra into a SWAN input file using SPC's MakSWANspec_first.awk
+		if [ "$i" = "0" ]; then
+			awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} -v t=$dateforecaststr -f MakSWANspec_first.awk total_spec.txt >${NAMES[$indx]}.spec
+		else
+			awk -v lon=${LONS[$indx]} -v lat=${LATS[$indx]} -v t=$dateforecaststr -f MakSWANspec.awk total_spec.txt >>${NAMES[$indx]}.spec
+		fi
+	done
+
+	rm Hswell1tmp.txt Dswell1tmp.txt Tswell1tmp.txt Hswell2tmp.txt Dswell2tmp.txt Tswell2tmp.txt Hwindtmp.txt Dwindtmp.txt Twindtmp.txt
+
+	sleep 1
+done
+
+# Prepare the SWAN operational file (*.swn) by modifying the Master operational file (Fiji1MASTER.swn)
+
+### Note that SWN file is in UTC
+sed s/WINDSTARTS/${dateforecaststarts}/ Fiji1MASTER.swn >tmp1.txt
+sed s/WINDENDS/${dateforecastends}/ tmp1.txt >tmp2.txt
+sed s/MODSTART/${dateforecaststarts}/ tmp2.txt >tmp3.txt
+sed s/MODPLUS/${dateforecastplus}/ tmp3.txt >tmp4.txt
+sed s/MODEND/${dateforecastends}/ tmp4.txt >Fiji_${filedate}_${Tcycle}.swn
+
+
+#Run SWAN. WARNING!!! Depending on the nb of CPU available, change the number of threads the model will run with.
+#currently set to 4 threads
+swanrun.bat Fiji_${filedate}_${Tcycle} 12
+wait
+until [[ -f ./out/Buoy_Komave.tab || ./out/Stat_Hs.dat ]]
+do
+	echo awaiting for the wave model to complete
+	sleep 10
+done
+#remove all the used/temp  files
+rm Wind_tmp.grb2 Wind_tmp.nc tmp.grib2 tmp.nc jonswap.dat South_1_sw1.txt Swell1.nc South_1_sw2.txt Swell2.nc WindWave.nc South_1_ww.txt
+
+##Visual Wave model validation
+cd ./out
+#Extract wave forecast parameters at the wave buoy for visual validation/interpretation
+awk '{if(NR>7) {printf("%s\t%f\t%f\t%f\t%f\t%f\n",$1,$3,$5,$6,$7,$8)}}' Buoy_Komave.tab >$product_path_log/out/Buoy_Komave_forecast.txt
+#extract first 6 hours of the wave forecast at the wave buoy location and append into the nowcast wave timeserie for comparison with wave buoy
+awk '{if(NR>7 && NR<14) {printf("%s\t%f\t%f\t%f\t%f\t%f\n",$1,$3,$5,$6,$7,$8)}}' Buoy_Komave.tab >>$product_path_log/out/Buoy_Komave_nowcast.txt
+
+cd ..
+
+#mkdir $product_path_log/out/$fol
+#Archive some of the wave model inputs
+mv South_2.spec South_3.spec South_4.spec South_5.spec East_2.spec East_3.spec East_4.spec West_2.spec West_3.spec West_4.spec Wind.dat Fiji_${filedate}_${Tcycle}.swn $product_path_log/out/$fol
+#Archive some of the wave model outputs
+mv ./out/*.tab $product_path_log/out/$fol
+cp $product_path_log/out/Buoy_Komave_forecast.txt $product_path_log/out/$fol
+

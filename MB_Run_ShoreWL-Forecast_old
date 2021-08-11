@@ -1,0 +1,338 @@
+#!/bin/bash
+
+fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+
+
+
+SLA=`awk '{if(NR==1){print($3)}}' sla.txt`
+
+### Prepare sunset and sunrise file for plotting the shaded area during night
+#here we get the 1st and 3rd line of LastCycle 
+ddd=`awk '{if(NR==1){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT%s:%s:%s/%s-%s-%sT%s:%s:%s",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2),substr(Dstart[2],1,2),substr(Dstart[2],3,2),substr(Dstart[2],5,2),substr(Dend[1],1,4),substr(Dend[1],5,2),substr(Dend[1],7,2),substr(Dend[2],1,2),substr(Dend[2],3,2),"01")}}' Lastcycle.txt`
+
+FJd=`awk '{if(NR==3){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT%s:%s:%s/%s-%s-%sT%s:%s:%s",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2),substr(Dstart[2],1,2),substr(Dstart[2],3,2),substr(Dstart[2],5,2),substr(Dend[1],1,4),substr(Dend[1],5,2),substr(Dend[1],7,2),substr(Dend[2],1,2),substr(Dend[2],3,2),"01")}}' Lastcycle.txt`
+
+# Find the starting date at midnight
+dddst=`awk '{if(NR==1){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT00:00:00",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2))}}' Lastcycle.txt`
+dddnd=`awk '{if(NR==3){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT00:00:00",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2))}}' Lastcycle.txt`
+
+
+
+echo -e ${dddst} "\t0" > daysnights.txt
+
+
+#Get the next sunrise and sunset
+for days in 0 1 2 3 4 5 6 7 8 9 10
+do
+
+
+dstr=`echo ${dddst} "GMT+12 + ${days} days" `
+
+#echo ${dstr}
+
+dddtost=`date +"%FT%H:%M:00" -d"${dstr}"`
+
+#echo ${dddtost}
+#Get daily night and day through pssolar
+daystart=`pssolar -I177.30/-18.30+d${dddtost}+z12 -C | awk -v dstr=${dddtost} '{printf("%s GMT+12 + %d minutes",dstr,$5*24*60)}'`
+dayend=`pssolar -I177.30/-18.30+d${dddtost}+z12 -C | awk -v dstr=${dddtost} '{printf("%s GMT+12 + %d minutes",dstr,$6*24*60)}'`
+
+dstrformatedst=`date +"%FT%H:%M:00" -d"${daystart}"`
+dstrformatednd=`date +"%FT%H:%M:00" -d"${dayend}"`
+
+echo -e ${dstrformatedst} "\t1" >> daysnights.txt
+echo -e ${dstrformatedst} "\t0" >> daysnights.txt
+echo -e ${dstrformatednd} "\t0" >> daysnights.txt
+echo -e ${dstrformatednd} "\t1" >> daysnights.txt
+done
+echo -e ${dstrformatednd} "\t0" >> daysnights.txt
+
+#For each locations
+
+for Loc in Maui_Bay
+do
+
+filein=./out/$fol/${Loc}.tab
+
+#echo $regionFJW
+
+regionFJdHs=-R${FJd}/-0.5/2.0
+regionHs=-R${ddd}/-0.5/2.0
+
+regionFJdSun=-R${FJd}/0/1
+
+#echo $ddd
+psout=${Loc}-WL.ps
+
+proj=-JX15c/5c
+
+
+
+# Extract the tide prediction for the SWAN output period -  tide prediction is in FJT
+gmtselect -R${FJd}/-20/20 -Jx1 Tidepredict_2015-2030B.txt | awk -v slano=$SLA '{printf("%f\n",$2+slano)}' >Tidethisweek.txt
+
+#awk '{if(NR>7){split($1,time,"."); printf("%sT%s\t%f\t%f\t%f\n",time[1],time[2],$3,$5,$7)}}' $filein >Waveparam.txt
+awk '{if(NR>7){split($1,time,"."); printf("%f\t%f\t%f\n",$3,$5,$7)}}' $filein >${Loc}_Waveparam.txt
+
+paste ${Loc}_Waveparam.txt Tidethisweek.txt > Forecast-Centers_${Loc}_Shore.txt
+
+
+#First forecast Max expected water level using the Radial Basis Function
+
+#prepare input file for RBFmat.exe
+echo "#Header" > RBF_param.txt
+echo "gamma = 0.27021;" >> RBF_param.txt
+echo "centersfile = test_MDA_300.dat;" >> RBF_param.txt
+echo "RBFcoefffile = MauiB_Shore_Max_RBF_coef.txt;" >> RBF_param.txt
+echo "inputfile = Forecast-Centers_MB_Shore.txt;" >> RBF_param.txt
+echo "trainingfile = MauiBay_Shore_MDA_zs.txt;" >> RBF_param.txt
+echo "isdir=2;" >> RBF_param.txt
+echo "trainRBF = 0;" >> RBF_param.txt
+echo "saveRBFcoeffs = 0;" >> RBF_param.txt
+echo "interpRBF = 1;" >> RBF_param.txt
+echo "outputfile = MauiBay-WLmax.txt;" >> RBF_param.txt
+
+./RBFmat
+
+
+#Then forecast the expected hourly mean level of the sea
+
+#prepare input file for RBFmat.exe
+echo "#Header" > RBF_param.txt
+echo "gamma = 0.28391;" >> RBF_param.txt
+echo "centersfile = test_MDA_300.dat;" >> RBF_param.txt
+echo "RBFcoefffile = MauiB_Shore_Mean_RBF_coef.txt;" >> RBF_param.txt
+echo "inputfile = Forecast-Centers_MB_Shore.txt;" >> RBF_param.txt
+echo "trainingfile = MauiBay_Shore_MDA_zs.txt;" >> RBF_param.txt
+echo "isdir=2;" >> RBF_param.txt
+echo "trainRBF = 0;" >> RBF_param.txt
+echo "saveRBFcoeffs = 0;" >> RBF_param.txt
+echo "interpRBF = 1;" >> RBF_param.txt
+echo "outputfile = MauiBay-WLmean.txt;" >> RBF_param.txt
+
+./RBFmat
+
+
+dos2unix MauiBay-WLmean.txt
+dos2unix MauiBay-WLmax.txt
+
+
+
+#paste the RBF interpolation results to the Tidethisweek file
+# Extract the tide prediction for the SWAN output period but this time with time stamp for plotting
+#hd:added -foOT to align with GMT version6
+gmtselect -R$FJd/-20/20 -Jx1T -fo0T Tidepredict_2015-2030B.txt | awk -v slano=$SLA '{printf("%s\t%f\n",$1,$2+slano)}' >Tideforecast.txt
+
+paste Tideforecast.txt MauiBay-WLmax.txt MauiBay-WLmean.txt > ${Loc}_WL-Forecast.txt
+
+paste Tideforecast.txt MauiBay-WLmax.txt MauiBay-WLmean.txt ${Loc}_Waveparam.txt > ${Loc}_allParam.txt
+
+
+
+awk '{if(NR==1){printf("%s\t%f\n",$1,-0.5)}}' ${Loc}_WL-Forecast.txt >${Loc}_Waterleveltoplot.txt
+awk '{printf("%s\t%f\n",$1,$3)}' ${Loc}_WL-Forecast.txt >>${Loc}_Waterleveltoplot.txt
+awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,-0.5)}' ${Loc}_WL-Forecast.txt >>${Loc}_Waterleveltoplot.txt
+
+
+awk '{if(NR==1){printf("%s\t%f\n",$1,1.0411)}}' ${Loc}_WL-Forecast.txt >Yellow.txt
+awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,1.0411)}' ${Loc}_WL-Forecast.txt >>Yellow.txt
+awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,1.1886)}' ${Loc}_WL-Forecast.txt >>Yellow.txt
+awk '{if(NR==1){printf("%s\t%f\n",$1,1.1886)}}' ${Loc}_WL-Forecast.txt >>Yellow.txt
+
+awk '{if(NR==1){printf("%s\t%f\n",$1,1.1886)}}' ${Loc}_WL-Forecast.txt >Orange.txt
+awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,1.1886)}' ${Loc}_WL-Forecast.txt >>Orange.txt
+awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,1.4963)}' ${Loc}_WL-Forecast.txt >>Orange.txt
+awk '{if(NR==1){printf("%s\t%f\n",$1,1.4963)}}' ${Loc}_WL-Forecast.txt >>Orange.txt
+
+awk '{if(NR==1){printf("%s\t%f\n",$1,1.4963)}}' ${Loc}_WL-Forecast.txt >Red.txt
+awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,1.4963)}' ${Loc}_WL-Forecast.txt >>Red.txt
+awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,5.0)}' ${Loc}_WL-Forecast.txt >>Red.txt
+awk '{if(NR==1){printf("%s\t%f\n",$1,5.0)}}' ${Loc}_WL-Forecast.txt >>Red.txt
+
+
+
+
+#Plot day and nights
+psxy ${regionFJdSun} $proj daysnights.txt -G220 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm:ss  -K -Y10>$psout
+
+#overlay Warning zones
+#WARNING HARD WIRED TO MAUI BAY
+psxy  ${regionFJdHs} $proj Yellow.txt -Gyellow@60 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm  -K -O -t60 >>$psout
+psxy  ${regionFJdHs} $proj Orange.txt -Gorange@60 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm  -K -O -t60 >>$psout
+psxy  ${regionFJdHs} $proj Red.txt -Gred@60 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm  -K -O -t60 >>$psout
+
+psbasemap ${regionFJdHs} $proj -Bsa1K/0s -Bpa12hf3hg12h/a0.5f0.1g:"Water Level [m above msl]":1WSen --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --FORMAT_DATE_MAP="mm-dd" --FORMAT_TIME_SECONDARY_MAP=abbreviated --FORMAT_TIME_PRIMARY_MAP=abbreviated --MAP_GRID_PEN_PRIMARY=0.5p,170 --MAP_GRID_PEN_SECONDARY=0.1p,170 -O -K >>$psout
+psbasemap ${regionFJdHs} $proj -Bsa1Rg3h/g1S --MAP_ANNOT_OFFSET_SECONDARY=17p --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --FORMAT_DATE_MAP="mm-dd" --FORMAT_TIME_SECONDARY_MAP=abbreviated --FORMAT_TIME_PRIMARY_MAP=abbreviated --MAP_GRID_PEN_PRIMARY=0.5p,200 --MAP_GRID_PEN_SECONDARY=0.1p,200 --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -K -O >>$psout
+
+#Plot the blue shading (zs max)
+psxy ${Loc}_Waterleveltoplot.txt $regionFJdHs $proj -G57/176/221@60 -L --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm:ss -O -K -t60 >>$psout
+
+#Plot the plain line (zs mean)
+awk '{printf("%s\t%f\n",$1,$4)}' ${Loc}_WL-Forecast.txt | psxy $regionFJdHs $proj -W0.5p,black --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm:ss -O -K>>$psout
+
+#Plot the dashline (predicted tide offshore)
+awk '{printf("%s\t%f\n",$1,$2)}' ${Loc}_WL-Forecast.txt | psxy $regionFJdHs $proj -W0.5p,black,'-' --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm:ss -O -K>>$psout
+
+
+
+psxy ${regionFJdHs} $proj -O -T>>$psout
+
+psconvert -A -P -Tf $psout
+
+psconvert -A -P -Tg $psout
+
+
+
+# Check whether any of the forecast outputs are exceeding a certain threshold to produce inundation maps
+# Here the threshold is hardwired for testing sake
+awk '{if($3>1.5){printf("%f\t%f\t%f\t%f\n",$5,$6,$7,$2)}}' allParam.txt > RBFformaps.txt
+awk '{if($3>1.5){printf("%s\n",$1)}}' allParam.txt > Mapdates.txt
+
+ninund=`awk 'END{print(NR)}' Mapdates.txt `
+
+echo $ninund
+
+rm MB_inund_*.png
+
+if [ "$ninund" -gt "0" ]
+then
+
+
+
+
+#step to read
+for ((step=0; step<${ninund}; step=step+1))
+do
+
+  awk -v line=$step '{if (NR==(line+1)){print($0)}}' RBFformaps.txt >RBFtorun.txt
+
+  #prepare input file for RBFmat.exe to generate inundation maps
+  echo "#Header" > RBF_param.txt
+  #echo "gamma = 0.2672;" >> RBF_param.txt
+  echo "centersfile = test_MDA_300.dat;" >> RBF_param.txt
+  echo "RBFcoefffile = MauiB_Grid_zsmax2D_RBF_coef.nc?3Dvar;" >> RBF_param.txt
+  echo "gammafile = MauiB_Grid_zsmax2D_RBF_coef.nc?gamma;" >> RBF_param.txt
+  echo "inputfile = RBFtorun.txt;" >> RBF_param.txt
+  echo "trainingfile = MauiBay_Shore_MDA_zs.txt;" >> RBF_param.txt
+  echo "isdir=2;" >> RBF_param.txt
+  echo "trainRBF = 0;" >> RBF_param.txt
+  echo "saveRBFcoeffs = 0;" >> RBF_param.txt
+  echo "interpRBF = 1;" >> RBF_param.txt
+  echo "outputfile = MauiBay-zsmaxmaps.nc?z;" >> RBF_param.txt
+
+  ./RBFmat
+
+  #prepare input file for RBFmat.exe to generate inundation maps
+  echo "#Header" > RBF_param.txt
+  echo "gamma = 0.2672;" >> RBF_param.txt
+  echo "centersfile = test_MDA_300.dat;" >> RBF_param.txt
+  echo "RBFcoefffile = MauiB_Grid_Inund2D_RBF_coef.nc?3Dvar;" >> RBF_param.txt
+  echo "gammafile = MauiB_Grid_Inund2D_RBF_coef.nc?gamma;" >> RBF_param.txt
+  echo "inputfile = RBFtorun.txt;" >> RBF_param.txt
+  echo "trainingfile = MauiBay_Shore_MDA_zs.txt;" >> RBF_param.txt
+  echo "isdir=2;" >> RBF_param.txt
+  echo "trainRBF = 0;" >> RBF_param.txt
+  echo "saveRBFcoeffs = 0;" >> RBF_param.txt
+  echo "interpRBF = 1;" >> RBF_param.txt
+  echo "outputfile = MauiBay-inundindxmaps.nc?z;" >> RBF_param.txt
+
+  ./RBFmat
+
+  echo $step
+  iform=`printf '%3.3i' $step`
+  outfile=MB_inund_${iform}.ps
+
+
+
+  #This below is a bit anoying
+  #Somehow I cannot read teh output of RBFmat straigh in GMT on this computer (Works fine on other machines)
+  #the workaround is to convert the grid in GDAL but it can't handle a 3D grid so for each step we run RBFmat and process teh data and Plot
+  #this is highly inefficient use of RBF mat
+  zsmaxfile=MauiBay-zsmaxmaps.nc?z[0]
+  inundfile=MauiBay-inundindxmaps.nc?z[0]
+
+
+
+  grdconvert ${zsmaxfile}=gd zsmax.nc
+  grdconvert ${inundfile}=gd inund.nc
+
+
+
+
+  grdmath MDA_SIM_001.nc?zb -1.0 MUL 0.011 ADD = zsdry.nc
+  grdmath zsdry.nc 1.0 GT = land.nc
+
+
+  grdmath inund.nc 0.5 GE = inundcheck.nc
+
+  grdmath zsmax.nc zsdry.nc GT inundcheck.nc MUL land.nc MUL = wet.nc
+  grdmath wet.nc 0.0 NAN = wetNaN.nc
+
+
+
+  grdmath wet.nc zsmax.nc MUL = Runup.nc
+  grdmath zsmax.nc zsdry.nc SUB wet.nc MUL = Flow-depth.nc
+
+  grdmath zsmax.nc zsdry.nc SUB wetNaN.nc MUL = Flow-depth_toplot.nc
+
+
+
+  #herve D.,2020 rotate grid, plot & overlay with geotiff
+..grd2xyz Flow-depth_toplot.nc > Flow-depth_toplot.xyz
+..awk 'BEGIN{xo=0;yo=0; a=-75}{alpha=a*3.14/180;xp=$1-xo; yp=$2-yo; i=yp*sin(alpha)+xp*cos(alpha); j=yp*cos(alpha)-xp*sin(alpha); print(i,j,$3)}' Flow-depth_toplot.xyz >Flow-depth_toplot_rot.xyz
+
+..region=-R-2775/450/0/2435
+..region1=-R569315/572540/7985650/7988085
+..blockmean Flow-depth_toplot_rot.xyz $region -I5 >Flow-depth_toplot_rot_blockmean.xyz
+..surface Flow-depth_toplot_rot_blockmean.xyz $region -I5 -M1c -GFlow-depth_toplot_rot.nc -T0.6
+..grdedit Flow-depth_toplot_rot.nc $region1 -GFlow-depth_toplot_rot_shifted.nc
+
+..region2=-R570160/572465/7986895/7987990
+..proj=-JX10c/0
+..psbasemap $region2 $proj -Bxf250a500 -Byf250a500 -BWSen -K  > $outfile
+..grdimage $region2 $proj Mauibay.tif -K -O  >> $outfile
+..grdimage $region2 $proj Flow-depth_toplot_rot_shifted.nc -CFlowdepth.cpt -Q -K -O  >> $outfile
+
+..psxy -R -J -T -O >> $outfile
+..psconvert -A -P -TG $outfile
+
+
+
+
+  #fol=$(awk '{if(NR==3) {printf $0}}' RS="/" Lastcycle.txt)
+  cp -f MB_inund_* /cygdrive/e/Fiji_Forecast/out/$fol/
+  cp -f MauiBay-zsmaxmaps* /cygdrive/e/Fiji_Forecast/out/$fol/
+  cp -f MauiBay-inundindxmaps* /cygdrive/e/Fiji_Forecast/out/$fol/
+  
+  ##
+  rm $outfile
+  rm MauiBay-zsmaxmaps.nc MauiBay-inundindxmaps.nc
+done
+
+#rm MauiBay-zsmaxmaps.nc MauiBay-inundindxmaps.nc
+
+
+fi
+
+
+#lftp sftp://wacop:J3fG5hxU1@149.28.179.75 -e "cd public_html/Forecast; put ${Loc}-WL.pdf; bye"
+#herve added
+cp -f ${Loc}-WL.png /cygdrive/e/Fiji_Forecast/out/$fol/
+cp -f ${Loc}-WL.pdf /cygdrive/e/Fiji_Forecast/out/$fol/
+
+####UNCOMMENT WHEN FTP IS READY
+#sshpass -p metWyattEarp38 scp -C /cygdrive/e/Fiji_Forecast/out/$fol/${Loc}.png root@192.168.8.54:/var/www/htdocs/CIFDP/
+#sshpass -p metWyattEarp38 scp -C /cygdrive/e/Fiji_Forecast/out/$fol/${Loc}-WL.png root@192.168.8.54:/var/www/htdocs/CIFDP/
+#sshpass -p metWyattEarp38 scp -C /cygdrive/e/Fiji_Forecast/out/$fol/*.nc root@192.168.8.54:/var/www/htdocs/CIFDP/
+#sshpass -p metWyattEarp38 scp -C /cygdrive/e/Fiji_Forecast/out/$fol/*.gif root@192.168.8.54:/var/www/htdocs/CIFDP/
+#sshpass -p metWyattEarp38 scp -C /cygdrive/e/Fiji_Forecast/out/$fol/*_compare.txt root@192.168.8.54:/var/www/htdocs/CIFDP/
+##
+done
+
+
+
+#####TOBE REMOVED AND SWAN TO EXPORT WAVE PARAM AT LOCATION (Mo to provide location)
+#cp ./out/$fol/${Loc}.tab ./out/$fol/Komave.tab
+#cp ./out/$fol/${Loc}.tab ./out/$fol/Korotogo.tab
+
+

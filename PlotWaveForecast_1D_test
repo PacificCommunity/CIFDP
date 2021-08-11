@@ -1,0 +1,128 @@
+#!/bin/bash
+
+FJd=`awk '{if(NR==3){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT%s:%s:%s/%s-%s-%sT%s:%s:%s",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2),substr(Dstart[2],1,2),substr(Dstart[2],3,2),substr(Dstart[2],5,2),substr(Dend[1],1,4),substr(Dend[1],5,2),substr(Dend[1],7,2),substr(Dend[2],1,2),substr(Dend[2],3,2),substr(Dend[2],5,2))}}' Lastcycle.txt`
+
+
+ddd=`awk '{if(NR==1){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT%s:%s:%s/%s-%s-%sT%s:%s:%s",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2),substr(Dstart[2],1,2),substr(Dstart[2],3,2),substr(Dstart[2],5,2),substr(Dend[1],1,4),substr(Dend[1],5,2),substr(Dend[1],7,2),substr(Dend[2],1,2),substr(Dend[2],3,2),substr(Dend[2],5,2))}}' Lastcycle.txt`
+
+
+# Find the starting day of the forecast  at midnioght
+dddst=`awk '{if(NR==1){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT00:00:00",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2))}}' Lastcycle.txt`
+
+
+
+echo -e ${dddst} "\t0" > daysnights.txt
+
+#Get the next sunrise and sunset
+for days in 0 1 2 3 4 5 6 7 8 9 10
+do
+
+
+dstr=`echo ${dddst} "GMT+12 + ${days} days" `
+
+#echo ${dstr}
+
+dddtost=`date +"%FT%H:%M:00" -d"${dstr}"`
+
+#echo ${dddtost}
+daystart=`pssolar -I177.30/-18.30+d${dddtost}+z12 -C | awk -v dstr=${dddtost} '{printf("%s GMT+12 + %d minutes",dstr,$5*24*60)}'`
+dayend=`pssolar -I177.30/-18.30+d${dddtost}+z12 -C | awk -v dstr=${dddtost} '{printf("%s GMT+12 + %d minutes",dstr,$6*24*60)}'`
+
+dstrformatedst=`date +"%FT%H:%M:00" -d"${daystart}"`
+dstrformatednd=`date +"%FT%H:%M:00" -d"${dayend}"`
+
+echo -e ${dstrformatedst} "\t1" >> daysnights.txt
+echo -e ${dstrformatedst} "\t0" >> daysnights.txt
+echo -e ${dstrformatednd} "\t0" >> daysnights.txt
+echo -e ${dstrformatednd} "\t1" >> daysnights.txt
+done
+echo -e ${dstrformatednd} "\t0" >> daysnights.txt
+
+
+
+
+
+regionFJdHs=-R${FJd}/0/4
+regionFJdTp=-R${FJd}/5/20
+regionFJW=-R${FJd}/0/20
+regionFJWk=-R${FJd}/0/38.8769
+#echo $regionFJW
+
+regionHs=-R${ddd}/0/4
+
+regiontext=-R0/10/0/3
+regionTp=-R${ddd}/5/20
+
+regionW=-R${ddd}/0/20
+regionWk=-R${ddd}/0/38.8769
+
+regionFJdSun=-R${FJd}/0/1
+
+
+proj=-JX15c/5c
+
+
+##herve added
+fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+
+#fol=$(awk '{if(NR==3) {printf $0}}' RS="/" Lastcycle.txt)
+#mkdir /cygdrive/d/Forecast_code/Forecast/out/$fol
+#
+for Loc in Cloudbreak LightHouse Mango_Bay_resort Maui_Bay Frigates Beach_House Sand_dunes Off_Natadola Natadola Rats HideAway Buoy_Kadavu Buoy_Shangrila Buoy_Komave
+do
+
+filein=./out/$fol/${Loc}.tab
+
+
+psout=${Loc}.ps
+
+psxy ${regionFJdSun} $proj daysnights.txt -G220 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm  -K -Y10>$psout
+
+psbasemap ${regionFJdHs} $proj -Bsa1K/0s -Bpa12hf3hg12h/a1f0.5g:"Wave Height [m]":1Wsn --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --MAP_GRID_PEN_PRIMARY=0.5p,200 -O -K >>$psout
+
+psbasemap ${regionFJdTp} $proj -Bpa12hf3hg3h/a5f1g1.25:"Peak Period [s]":E --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --MAP_GRID_PEN_PRIMARY=0.1p,200 -K -O>>$psout
+
+awk '{if(NR==8){split($1,time,"."); printf("%sT%s\t%f\n",time[1],time[2],0)}}' $filein >dum.txt
+awk '{if(NR>7){split($1,time,"."); printf("%sT%s\t%f\n",time[1],time[2],$3)}}' $filein >>dum.txt
+awk '{if(NR>7){x=$1;y=$3}}END{split(x,time,"."); printf("%sT%s\t%f\n",time[1],time[2],0)}' $filein >>dum.txt
+
+
+psxy dum.txt $regionHs $proj -G57/176/221@60 -L --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -O -K -t60 >>$psout
+awk '{if(NR>7){split($1,time,"."); printf("%sT%s\t%f\n",time[1],time[2],$3)}}' $filein | psxy $regionHs $proj -W0.5p,black --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -O -K>>$psout
+awk '{if(NR>7){split($1,time,"."); printf("%sT%s\t%f\n",time[1],time[2],$5)}}' $filein | psxy $regionTp $proj -W1.5p,red,'.' --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -O -K>>$psout
+awk 'BEGIN{b=8}{if(NR==b){split($1,time,"."); b=b+3; printf("%sT%s\t%f\t%f\t%f\n",time[1],time[2],$3,$7,0.5)}}' $filein | psxy $regionHs $proj -SV0.2+a40+b+jc -W1p,black -Gblack --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -O -K>>$psout
+
+awk '{if(NR==2){print(0.1,2.5,$0)}}' Lastcycle.txt | pstext $regiontext $proj -F+f12p,Helvetica,black+jLM -O -K>>$psout
+
+psxy ${regionFJdSun} $proj daysnights.txt -G220 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm -Y-5 -K -O>>$psout
+
+psbasemap ${regionFJW} $proj -Bsa1Kg3h/g1S -Bpa12hf3hg12h/a10f5g5:"Wind Speed [m/s]":WSn --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --FORMAT_DATE_MAP="mm-dd" --FORMAT_TIME_SECONDARY_MAP=abbreviated --FORMAT_TIME_PRIMARY_MAP=abbreviated --MAP_GRID_PEN_PRIMARY=0.5p,200 --MAP_GRID_PEN_SECONDARY=0.1p,200 --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -K -O >>$psout
+psbasemap ${regionFJW} $proj -Bsa1Rg3h/g1S --MAP_ANNOT_OFFSET_SECONDARY=17p --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --FORMAT_DATE_MAP="mm-dd" --FORMAT_TIME_SECONDARY_MAP=abbreviated --FORMAT_TIME_PRIMARY_MAP=abbreviated --MAP_GRID_PEN_PRIMARY=0.5p,200 --MAP_GRID_PEN_SECONDARY=0.1p,200 --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -K -O >>$psout
+
+psbasemap ${regionFJWk} $proj -Bpa12hf3h/a10f5:"Wind Speed [knt]":E --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --MAP_GRID_PEN_PRIMARY=0.5p,200 --MAP_GRID_PEN_SECONDARY=0.1p,200 --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -K -O>>$psout
+
+awk '{if(NR==8){split($1,time,"."); printf("%sT%s\t%f\n",time[1],time[2],0)}}' $filein >dum.txt
+awk '{if(NR>7){split($1,time,"."); printf("%sT%s\t%f\n",time[1],time[2],sqrt($8*$8+$9*$9))}}' $filein >>dum.txt
+awk '{if(NR>7){x=$1;y=$5}}END{split(x,time,"."); printf("%sT%s\t%f\n",time[1],time[2],0)}' $filein >>dum.txt
+
+psxy dum.txt $regionW $proj -G17/82/204@60 -L -O -K -t60 --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss >>$psout
+awk '{if(NR>7){split($1,time,"."); printf("%sT%s\t%f\n",time[1],time[2],sqrt($8*$8+$9*$9))}}' $filein | psxy $regionW $proj -W0.5p,black --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -O -K>>$psout
+awk 'BEGIN{b=2}{if(NR==b){b=b+3; split($1,time,"."); printf("%sT%s\t%f\t%f\t%f\n",time[1],time[2],sqrt($8*$8+$9*$9),90-atan2($9,$8)*180/3.14-180,0.5)}}' $filein | psxy $regionW $proj -SV0.2+a40+b+jc -W1p,black -Gblack --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -O -K>>$psout
+
+
+
+psxy $regionTp $proj -O -T>>$psout
+#ps2raster -A -P -Tf $psout
+psconvert -A -P -Tg $psout
+mv -f ${Loc}.png /cygdrive/e/Fiji_Forecast/out/$fol/${Loc}.png
+#Add a line to send to FMS server as well
+#Install sshpass in Cygwin
+#sshpass -p metWyattEarp38 scp -C /cygdrive/d/Forecast_code/Forecast/out/$fol/${Loc}.png root@192.168.8.54:/var/www/htdocs/CIFDP/ #sftp://wacop:J3fG5hxU1@149.28.179.75 -e "cd public_html/Forecast; put ${Loc}.pdf; bye"
+
+
+
+rm dum.txt $psout
+done
+
+#sshpass -p metWyattEarp38 scp -C /cygdrive/d/Forecast_code/Forecast/out/$fol/*.gif root@192.168.8.54:/var/www/htdocs/CIFDP/
+#sshpass -p metWyattEarp38 scp -C /cygdrive/d/Forecast_code/Forecast/out/$fol/*.nc root@192.168.8.54:/var/www/htdocs/CIFDP/

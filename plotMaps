@@ -1,0 +1,295 @@
+#!/bin/bash
+
+
+#################################################
+### WAVE Height Maps SWELL     ##################
+#################################################
+
+
+#makecpt -T0/4/0.2 -D -M -Cseminf-haxby.cpt >Hscolor.cpt
+#########commrents
+
+cd ./out/
+./proc_swanout
+cd ..
+
+fileHsw=./out/Hswell.nc?Hswell
+fileDp=./out/Dp.nc?dp
+fileTp=./out/Tp.nc?Tp
+fileL=./out/L.nc?L
+region=-R176.73/178.869/-19.33/-17.731
+
+proj=-JM15c
+
+for var in Hswell
+do
+	for ttt in 1 #13 25 37 49 61 73 85 97 109 121 133 145 157 169
+	do
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileHsw | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Hswell.nc
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileDp | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Dp.nc
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileTp | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Tp.nc
+      grdmath ${fileHsw}[${ttt}] 1 MUL = out_Hswell.nc
+	  grdmath ${fileDp}[${ttt}] 1 MUL = out_Dp.nc
+	  grdmath ${fileTp}[${ttt}] 1 MUL = out_Tp.nc
+	  grdmath ${fileL}[${ttt}] 1 MUL = out_L.nc
+	  #need this to remove round off error in Land-Nan
+	  grdsample Land-Nan.nc -Rout_${var}.nc -GLand-Nan_resampled.nc
+
+	  
+
+	  #grdsample Land-Nan.nc -Rout_Hswell.nc -GLand-Nan_resampled.nc
+	  grdmath out_${var}.nc Land-Nan_resampled.nc MUL = toplot1.nc
+
+
+	  #grdmath out_Dp.nc 0 MUL 1 ADD = Vect1.nc
+
+	  outps=${var}_${ttt}.ps
+	  outpng=${var}_${ttt}.png
+	  psbasemap $region $proj --MAP_FRAME_TYPE=plain --FONT_ANNOT_PRIMARY=10p,Helvetica,black -Ba0.5f0.1WSen -K > $outps
+
+	  grdview $region $proj toplot1.nc -C${var}color.cpt -Qs -O -K >> $outps
+
+
+	  grdsample out_Dp.nc $region -I0.05 -GdirFD.nc
+	  grdmath dirFD.nc 0.0 AND = dirFDAND.nc
+	  grdmath dirFDAND.nc 0.0 MUL 1.0 ADD = VeldirFDAND.nc
+
+	  grd2xyz dirFDAND.nc > dp_resampled.txt
+	  #grdsample Vect1.nc $region -I0.001 -GhsdirFD.nc
+	  #awk '{print($1,$2,$3,$4)}' dp_resampled.txt |psxy $region $proj -G0 -W0.6p,black -SV0.3p+b -O -K >> $outps
+	  #grdvector $region $proj VeldirFDAND.nc dirFDAND.nc -A -G0 -W0.6p,black -I0.05 -Q2p+b+a60+g0+jc -Sl3p -O -K >> $outps
+
+
+	  awk '{print($1,$2,$3,0.3)}' dp_resampled.txt |psxy $region $proj -G0 -SV3p+b -W0.5p,black -O -K >> $outps
+
+	  grdimage $region $proj Bathy_NOSEA.nc -CWheat_land.cpt -IGradient_Fj_Nan.nc -Q -O -K >> $outps
+	  grdcontour $region $proj bathy_fiji.nc -C+0  -Wc0.2p,00/00/00 -O -K >> $outps
+	  grdcontour $region $proj bathy_fiji.nc -C+1.5  -Wc0.2p,00/00/00,"-" -O -K >> $outps
+
+	  #grdmath ./DirMEanAll.nc 1 MUL 0 ADD = dirF.nc
+	  #grdmath ./HsMeanAll.nc 1 MUL toplot1.nc MUL = hsdirF.nc
+	  #grdsample dirF.nc $region -I0.001 -GdirFD.nc
+	  #grdsample hsdirF.nc $region -I0.001 -GhsdirFD.nc
+
+
+
+	  #echo "177.5 -19.0 90.0 1.0" | psxy $region $proj -SV0.3p+b -W1p,black -O -K >> $outps
+
+	  echo "177.433767,-17.772513 Nadi" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.2c/-0.15c -O -K>>$outps
+	  echo "178.441794,-18.097980 Suva" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps
+	  echo "177.502246,-18.138963 Sigatoka" | pstext $region $proj -F+a0-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps
+	  echo "178.177679,-18.215958 Navua" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.45c/-0.1c -O -K>>$outps
+	  echo "178.109877,-18.391847 Beqa" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.8c/-0.3c -O -K>>$outps
+	  echo "177.610555,-18.521345 Vatulele" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.5c/0.0c -O -K>>$outps
+	  echo "178.297961,-18.980413 Kadavu" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.4c/0.0c -O -K>>$outps
+	  echo "178.546730,-18.011885 Nausori" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -O -K>>$outps
+      echo "178.0,-17.800 Swell Height [m]" | pstext $region $proj -F+a-0+f12p,Helvetica,black+jMC -O -K>>$outps
+	  echo "178.1,-17.900 Last update:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+	  #awk '{if(NR==2){print(178.0,-18.000,"Last update:")}}' Lastcycle.txt | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+	  awk '{if(NR==2){print(178.1,-17.9700,$0)}}' Lastcycle.txt | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+	  dstr=`awk -v tt=$ttt '{if(NR==2){printf("%s + %s hours",$0,tt-1)}}' Lastcycle.txt`
+	  dstrformated=`date +"%a %d %b %H:00FJT" -d"${dstr}"`
+
+	  echo "177.4,-17.900 Forecast time:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+	  echo "177.4,-17.970 ${dstrformated}" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+	  #pscoast $region $proj -Df -W0.3p,black -Gblack -O -K >>$outps
+
+	  psscale -Dx15.2c/4c/8c/0.3c -C${var}color.cpt -Ba1f0.2 -Ef -O -K >> $outps1
+	  #psscale -Dx15.2c/4c/6c/0.3c -C${var}color.cpt -Ba1f0.2 -Ef -O -K >> $outps
+	  psxy $region $proj -T -O >> $outps
+
+	  psconvert -A -P -Tg $outps
+
+
+	# add a line below for Fiji Met server
+	#lftp sftp://wacop:J3fG5hxU1@149.28.179.75 -e "cd public_html/Forecast; put ${outpng}; bye"
+	##herve added
+	fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+	cp -f ${outpng} /cygdrive/d/Forecast_code/Forecast/out/$fol/${outpng}
+	done
+done
+#mv *.nc /cygdrive/d/Forecast_code/Forecast/out/$fol/
+#rm Stat*.dat
+rm *.ps
+
+for var in Tp
+do
+	for ttt in 1 #13 25 37 49 61 73 85 97 109 121 133 145 157 169
+	do
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileHsw | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Hswell.nc
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileDp | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Dp.nc
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileTp | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Tp.nc
+      grdmath ${fileHsw}[${ttt}] 1 MUL = out_Hswell.nc
+	  grdmath ${fileDp}[${ttt}] 1 MUL = out_Dp.nc
+	  grdmath ${fileTp}[${ttt}] 1 MUL = out_Tp.nc
+	  grdmath ${fileL}[${ttt}] 1 MUL = out_L.nc
+	  #need this to remove round off error in Land-Nan
+	  grdsample Land-Nan.nc -Rout_${var}.nc -GLand-Nan_resampled.nc
+
+	  
+
+	  #grdsample Land-Nan.nc -Rout_Hswell.nc -GLand-Nan_resampled.nc
+	  grdmath out_${var}.nc Land-Nan_resampled.nc MUL = toplot1.nc
+
+
+	  #grdmath out_Dp.nc 0 MUL 1 ADD = Vect1.nc
+
+	  outps1=${var}_${ttt}.ps
+	  outpng1=${var}_${ttt}.png
+	  psbasemap $region $proj --MAP_FRAME_TYPE=plain --FONT_ANNOT_PRIMARY=10p,Helvetica,black -Ba0.5f0.1WSen -K > $outps1
+
+	  grdview $region $proj toplot1.nc -C${var}color.cpt -Qs -O -K >> $outps1
+
+
+	  grdsample out_Dp.nc $region -I0.05 -GdirFD.nc
+	  grdmath dirFD.nc 0.0 AND = dirFDAND.nc
+	  grdmath dirFDAND.nc 0.0 MUL 1.0 ADD = VeldirFDAND.nc
+
+	  grd2xyz dirFDAND.nc > dp_resampled.txt
+	  #grdsample Vect1.nc $region -I0.001 -GhsdirFD.nc
+	  #awk '{print($1,$2,$3,$4)}' dp_resampled.txt |psxy $region $proj -G0 -W0.6p,black -SV0.3p+b -O -K >> $outps
+	  #grdvector $region $proj VeldirFDAND.nc dirFDAND.nc -A -G0 -W0.6p,black -I0.05 -Q2p+b+a60+g0+jc -Sl3p -O -K >> $outps
+
+
+	  awk '{print($1,$2,$3,0.3)}' dp_resampled.txt |psxy $region $proj -G0 -SV3p+b -W0.5p,black -O -K >> $outps1
+
+	  grdimage $region $proj Bathy_NOSEA.nc -CWheat_land.cpt -IGradient_Fj_Nan.nc -Q -O -K >> $outps1
+	  grdcontour $region $proj bathy_fiji.nc -C+0  -Wc0.2p,00/00/00 -O -K >> $outps1
+	  grdcontour $region $proj bathy_fiji.nc -C+1.5  -Wc0.2p,00/00/00,"-" -O -K >> $outps1
+
+	  #grdmath ./DirMEanAll.nc 1 MUL 0 ADD = dirF.nc
+	  #grdmath ./HsMeanAll.nc 1 MUL toplot1.nc MUL = hsdirF.nc
+	  #grdsample dirF.nc $region -I0.001 -GdirFD.nc
+	  #grdsample hsdirF.nc $region -I0.001 -GhsdirFD.nc
+
+
+
+	  #echo "177.5 -19.0 90.0 1.0" | psxy $region $proj -SV0.3p+b -W1p,black -O -K >> $outps
+
+	  echo "177.433767,-17.772513 Nadi" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.2c/-0.15c -O -K>>$outps1
+	  echo "178.441794,-18.097980 Suva" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps1
+	  echo "177.502246,-18.138963 Sigatoka" | pstext $region $proj -F+a0-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps1
+	  echo "178.177679,-18.215958 Navua" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.45c/-0.1c -O -K>>$outps1
+	  echo "178.109877,-18.391847 Beqa" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.8c/-0.3c -O -K>>$outps1
+	  echo "177.610555,-18.521345 Vatulele" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.5c/0.0c -O -K>>$outps1
+	  echo "178.297961,-18.980413 Kadavu" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.4c/0.0c -O -K>>$outps1
+	  echo "178.546730,-18.011885 Nausori" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -O -K>>$outps1
+	  echo "178.0,-17.800 Peak Wave Period [s]" | pstext $region $proj -F+a-0+f12p,Helvetica,black+jMC -O -K>>$outps1
+	  echo "178.1,-17.900 Last update:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps1
+	  #awk '{if(NR==2){print(178.0,-18.000,"Last update:")}}' Lastcycle.txt | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+	  awk '{if(NR==2){print(178.1,-17.9700,$0)}}' Lastcycle.txt | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps1
+	  dstr=`awk -v tt=$ttt '{if(NR==2){printf("%s + %s hours",$0,tt-1)}}' Lastcycle.txt`
+	  dstrformated=`date +"%a %d %b %H:00FJT" -d"${dstr}"`
+
+	  echo "177.4,-17.900 Forecast time:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps1
+	  echo "177.4,-17.970 ${dstrformated}" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps1
+	  #pscoast $region $proj -Df -W0.3p,black -Gblack -O -K >>$outps
+
+	  psscale -Dx15.2c/4c/8c/0.3c -C${var}color.cpt -Ba4f2 -Ef -O -K >> $outps1
+
+	  psxy $region $proj -T -O >> $outps1
+
+	  psconvert -A -P -Tg $outps1
+
+
+	# add a line below for Fiji Met server
+	#lftp sftp://wacop:J3fG5hxU1@149.28.179.75 -e "cd public_html/Forecast; put ${outpng}; bye"
+	##herve added
+	fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+	cp -f ${outpng1} /cygdrive/d/Forecast_code/Forecast/out/$fol/${outpng1}
+	done
+done
+#mv *.nc /cygdrive/d/Forecast_code/Forecast/out/$fol/
+#rm Stat*.dat
+rm *.ps
+
+for var in L
+do
+	for ttt in 1 #13 25 37 49 61 73 85 97 109 121 133 145 157 169
+	do
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileHsw | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Hswell.nc
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileDp | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Dp.nc
+	  #awk -v step=$ttt 'BEGIN{nx=714; ny=534}{if(NR>=1+(step-1)*ny*nx && NR<step*ny*nx){printf("%f\t%f\t%f\n",176.73+(NR % nx + 1)*0.003,-19.33+(((NR/nx)-((NR/nx)%1))+1)*0.003,$1)}}' $fileTp | xyz2grd -R176.73/178.869/-19.33/-17.731 -I0.003 -Gout_Tp.nc
+      grdmath ${fileHsw}[${ttt}] 1 MUL = out_Hswell.nc
+	  grdmath ${fileDp}[${ttt}] 1 MUL = out_Dp.nc
+	  grdmath ${fileTp}[${ttt}] 1 MUL = out_Tp.nc
+	  grdmath ${fileL}[${ttt}] 1 MUL = out_L.nc
+	  #need this to remove round off error in Land-Nan
+	  grdsample Land-Nan.nc -Rout_${var}.nc -GLand-Nan_resampled.nc
+
+	  
+
+	  #grdsample Land-Nan.nc -Rout_Hswell.nc -GLand-Nan_resampled.nc
+	  grdmath out_${var}.nc Land-Nan_resampled.nc MUL = toplot1.nc
+
+
+	  #grdmath out_Dp.nc 0 MUL 1 ADD = Vect1.nc
+
+	  outps2=${var}_${ttt}.ps
+	  outpng2=${var}_${ttt}.png
+	  psbasemap $region $proj --MAP_FRAME_TYPE=plain --FONT_ANNOT_PRIMARY=10p,Helvetica,black -Ba0.5f0.1WSen -K > $outps2
+
+	  grdview $region $proj toplot1.nc -C${var}color.cpt -Qs -O -K >> $outps2
+
+
+	  grdsample out_Dp.nc $region -I0.05 -GdirFD.nc
+	  grdmath dirFD.nc 0.0 AND = dirFDAND.nc
+	  grdmath dirFDAND.nc 0.0 MUL 1.0 ADD = VeldirFDAND.nc
+
+	  grd2xyz dirFDAND.nc > dp_resampled.txt
+	  #grdsample Vect1.nc $region -I0.001 -GhsdirFD.nc
+	  #awk '{print($1,$2,$3,$4)}' dp_resampled.txt |psxy $region $proj -G0 -W0.6p,black -SV0.3p+b -O -K >> $outps
+	  #grdvector $region $proj VeldirFDAND.nc dirFDAND.nc -A -G0 -W0.6p,black -I0.05 -Q2p+b+a60+g0+jc -Sl3p -O -K >> $outps
+
+
+	  awk '{print($1,$2,$3,0.3)}' dp_resampled.txt |psxy $region $proj -G0 -SV3p+b -W0.5p,black -O -K >> $outps2
+
+	  grdimage $region $proj Bathy_NOSEA.nc -CWheat_land.cpt -IGradient_Fj_Nan.nc -Q -O -K >> $outps2
+	  grdcontour $region $proj bathy_fiji.nc -C+0  -Wc0.2p,00/00/00 -O -K >> $outps2
+	  grdcontour $region $proj bathy_fiji.nc -C+1.5  -Wc0.2p,00/00/00,"-" -O -K >> $outps2
+
+	  #grdmath ./DirMEanAll.nc 1 MUL 0 ADD = dirF.nc
+	  #grdmath ./HsMeanAll.nc 1 MUL toplot1.nc MUL = hsdirF.nc
+	  #grdsample dirF.nc $region -I0.001 -GdirFD.nc
+	  #grdsample hsdirF.nc $region -I0.001 -GhsdirFD.nc
+
+
+
+	  #echo "177.5 -19.0 90.0 1.0" | psxy $region $proj -SV0.3p+b -W1p,black -O -K >> $outps
+
+	  echo "177.433767,-17.772513 Nadi" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.2c/-0.15c -O -K>>$outps2
+	  echo "178.441794,-18.097980 Suva" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps2
+	  echo "177.502246,-18.138963 Sigatoka" | pstext $region $proj -F+a0-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps2
+	  echo "178.177679,-18.215958 Navua" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.45c/-0.1c -O -K>>$outps2
+	  echo "178.109877,-18.391847 Beqa" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.8c/-0.3c -O -K>>$outps2
+	  echo "177.610555,-18.521345 Vatulele" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.5c/0.0c -O -K>>$outps2
+	  echo "178.297961,-18.980413 Kadavu" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.4c/0.0c -O -K>>$outps2
+	  echo "178.546730,-18.011885 Nausori" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -O -K>>$outps2
+	  echo "178.0,-17.800 Mean Wave Length [m]" | pstext $region $proj -F+a-0+f12p,Helvetica,black+jMC -O -K>>$outps2
+	  echo "178.1,-17.900 Last update:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps2
+	  #awk '{if(NR==2){print(178.0,-18.000,"Last update:")}}' Lastcycle.txt | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+	  awk '{if(NR==2){print(178.1,-17.9700,$0)}}' Lastcycle.txt | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps2
+	  dstr=`awk -v tt=$ttt '{if(NR==2){printf("%s + %s hours",$0,tt-1)}}' Lastcycle.txt`
+	  dstrformated=`date +"%a %d %b %H:00FJT" -d"${dstr}"`
+
+	  echo "177.4,-17.900 Forecast time:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps2
+	  echo "177.4,-17.970 ${dstrformated}" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps2
+	  #pscoast $region $proj -Df -W0.3p,black -Gblack -O -K >>$outps
+
+	  psscale -Dx15.2c/2c/8c/0.3c -C${var}color.cpt -Ba50f25 -Ef -O -K >> $outps2
+
+	  psxy $region $proj -T -O >> $outps2
+
+	  psconvert -A -P -Tg $outps2
+
+
+	# add a line below for Fiji Met server
+	#lftp sftp://wacop:J3fG5hxU1@149.28.179.75 -e "cd public_html/Forecast; put ${outpng}; bye"
+	##herve added
+	fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+	cp -f ${outpng2} /cygdrive/d/Forecast_code/Forecast/out/$fol/${outpng2}
+	done
+done
+#mv *.nc /cygdrive/d/Forecast_code/Forecast/out/$fol/
+#rm Stat*.dat
+rm *.ps

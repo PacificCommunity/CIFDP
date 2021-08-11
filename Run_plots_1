@@ -1,0 +1,31 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funder: Korea                                                         ##
+## Manager: WMO                                                          ##
+## Implementer: SPC                                                      ##
+###########################################################################
+## Authors: Herve Damlamian                                              ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+###########################################################################
+## Description:                                                          ##
+## Run_plots_1:                                                          ##
+##      1) master script to run the various plotting scripts             ##
+## This code was created to improve the map generation computation time  ##
+## and easily allow plotting to occur simultaneously                     ##
+###########################################################################
+
+#Start 2D plots.
+./plotMapsHs
+#./plotMapsL
+#./plotMapsTp
+#./plotMapsHswell
+
+echo 'completed 2D plots'
+
+#Start 1D plots
+./PlotWaveForecast_1D
+wait
+echo '***** Completed Wave forecast including plotting *****'

@@ -1,0 +1,66 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funder: Korea                                                         ##
+## Manager: WMO                                                          ##
+## Implementer: SPC                                                      ##
+###########################################################################
+## Authors: Herve Damlamian, (based on Cyprien Bosserelle 2017 release)  ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+###########################################################################
+## Description:                                                          ##
+## Run_RBF:                                                              ##
+##      1) master script to run the various plotting scripts             ##
+## This code was created to improve the map generation computation time  ##
+## and easily allow plotting to occur simultaneously                     ##
+###########################################################################
+
+###get offshore water level for each site (tide + SLA)
+./Offshore_WL_Forecast
+
+### Prepare sunset and sunrise file for plotting the shaded area during night
+# Find the starting date at midnight
+dddst=`awk '{if(NR==1){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT00:00:00",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2))}}' Lastcycle.txt`
+dddnd=`awk '{if(NR==3){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT00:00:00",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2))}}' Lastcycle.txt`
+
+
+
+echo -e ${dddst} "\t0" > daysnights.txt
+
+
+#Get the next sunrise and sunset
+for days in 0 1 2 3 4 5 6 7 8 9 10
+do
+
+
+	dstr=`echo ${dddst} "GMT+12 + ${days} days" `
+
+	#echo ${dstr}
+
+	dddtost=`date +"%FT%H:%M:00" -d"${dstr}"`
+
+	#echo ${dddtost}
+	#Get daily night and day through pssolar
+	daystart=`pssolar -I177.30/-18.30+d${dddtost}+z12 -C | awk -v dstr=${dddtost} '{printf("%s GMT+12 + %d minutes",dstr,$5*24*60)}'`
+	dayend=`pssolar -I177.30/-18.30+d${dddtost}+z12 -C | awk -v dstr=${dddtost} '{printf("%s GMT+12 + %d minutes",dstr,$6*24*60)}'`
+
+	dstrformatedst=`date +"%FT%H:%M:00" -d"${daystart}"`
+	dstrformatednd=`date +"%FT%H:%M:00" -d"${dayend}"`
+
+	echo -e ${dstrformatedst} "\t1" >> daysnights.txt
+	echo -e ${dstrformatedst} "\t0" >> daysnights.txt
+	echo -e ${dstrformatednd} "\t0" >> daysnights.txt
+	echo -e ${dstrformatednd} "\t1" >> daysnights.txt
+done
+echo -e ${dstrformatednd} "\t0" >> daysnights.txt
+
+
+### Run the RBFs
+./MB_Run_ShoreWL-Forecast > MB.log &
+./CV_Run_ShoreWL-Forecast > CV.log &
+./KV_Run_ShoreWL-Forecast > KV.log &
+./KRTG_Run_ShoreWL-Forecast
+wait
+echo '*****completed Water Level and Inundation Forecast including plotting *****'

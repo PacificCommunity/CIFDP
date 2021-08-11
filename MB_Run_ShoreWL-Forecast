@@ -1,0 +1,275 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funder: Korea                                                         ##
+## Manager: WMO                                                          ##
+## Implementer: SPC                                                      ##
+###########################################################################
+## Authors: Herve Damlamian (based on Cyprien Bosserelle 2017 release)   ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+## Project background:  Korea and managed by WMO                         ##
+###########################################################################
+## Description:                                                          ##
+## MB_Run_ShoreWl-Forecast inlcudes the following components:            ##
+## 1) Compute nearshore water level forecast for three defined sites     ##
+## components and plot.                                                  ##
+## 2) Compute inundation maps                                            ##
+## 3) Georectify and format inundation maps for ingestion into thredds   ##
+###########################################################################
+
+#Define output folder
+fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+product_path_log=`awk -F'[<>]' '/ProductOutPath/ {print $3}' config_path.xml`
+working_dir=`awk -F'[<>]' '/workingpath/ {print $3}' config_working.xml`
+
+## 2021/ HD change the loop to run in parallel. Could add all sites in the for loop but will result in time penalities
+for Loc in MauiBay
+do
+
+	#filein=./out/$fol/${Loc}.tab
+	filein=$product_path_log/out/$fol/${Loc}.tab
+
+	#get time and regions for plotting
+	FJd=`awk '{if(NR==3){split($1,time,"/");split(time[1],Dstart,".");split(time[2],Dend,"."); printf("%s-%s-%sT%s:%s:%s/%s-%s-%sT%s:%s:%s",substr(Dstart[1],1,4),substr(Dstart[1],5,2),substr(Dstart[1],7,2),substr(Dstart[2],1,2),substr(Dstart[2],3,2),substr(Dstart[2],5,2),substr(Dend[1],1,4),substr(Dend[1],5,2),substr(Dend[1],7,2),substr(Dend[2],1,2),substr(Dend[2],3,2),"01")}}' Lastcycle.txt`
+	regionFJdHs=-R${FJd}/-0.5/2.0
+	regionFJdSun=-R${FJd}/0/1
+	proj=-JX15c/5c
+
+	awk '{if(NR>7){split($1,time,"."); printf("%f\t%f\t%f\n",$3,$5,$7)}}' $filein >${Loc}_Waveparam.txt
+	for site in site1
+	do
+		#Define figure output
+		psout=${Loc}-WL-${site}.ps
+		#Create input file for RBF
+		paste ${Loc}_Waveparam.txt ${Loc}_Tidethisweek.txt > Forecast-Centers_${Loc}_Shore.txt
+
+		#Go into the RBF folder
+		cd $working_dir/RBF/${Loc}/${site}
+		#Copy the RBF input file
+		cp $working_dir/Forecast-Centers_${Loc}_Shore.txt ./
+		#Generate RBF param file
+		echo "#Header" > RBF_param.txt
+		awk '{if(NR==1){printf("gamma = %f;",$1)}}' RBF_${Loc}_zmax_gamma_${site}.txt >> RBF_param.txt
+		echo -e "\ncentersfile = ${Loc}_MDA_300.dat;" >> RBF_param.txt
+		echo "RBFcoefffile = ${Loc}_Shore_Max_RBF_coef_${site}.txt;" >> RBF_param.txt
+		echo "inputfile = Forecast-Centers_${Loc}_Shore.txt;" >> RBF_param.txt
+		echo "trainingfile = MDA_zsmax_${Loc}_${site}.txt;" >> RBF_param.txt
+		echo "isdir=2;" >> RBF_param.txt
+		echo "trainRBF = 0;" >> RBF_param.txt
+		echo "saveRBFcoeffs = 0;" >> RBF_param.txt
+		echo "interpRBF = 1;" >> RBF_param.txt
+		echo "outputfile = ${Loc}-${site}-WLmax.txt;" >> RBF_param.txt
+
+		#Run RBF
+		./RBFmat
+
+		dos2unix ${Loc}-${site}-WLmax.txt
+
+		cp $working_dir/RBF/${Loc}/${site}/${Loc}-${site}-WLmax.txt $working_dir/
+
+		cd $working_dir
+
+		#paste the RBF interpolation results to the Tidethisweek file
+		paste ${Loc}_Tideforecast.txt ${Loc}-${site}-WLmax.txt > WL-Forecast-${Loc}-${site}.txt
+
+		paste ${Loc}_Tideforecast.txt ${Loc}-${site}-WLmax.txt ${Loc}_Waveparam.txt > allParam-${Loc}-${site}.txt
+
+		#get the max water level treshold based on hindcast data 
+		p99=`awk '{if(NR==1) {printf("%f",$1)}}' perc_${Loc}_max_${site}.txt`
+		p95=`awk '{if(NR==1) {printf("%f",$2)}}' perc_${Loc}_max_${site}.txt`
+		p90=`awk '{if(NR==1) {printf("%f",$3)}}' perc_${Loc}_max_${site}.txt`
+
+		#get water level for plotting purposes
+		awk '{if(NR==1){printf("%s\t%f\n",$1,-0.5)}}' WL-Forecast-${Loc}-${site}.txt >${Loc}_Waterleveltoplot.txt
+		awk '{printf("%s\t%f\n",$1,$3)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_Waterleveltoplot.txt
+		awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,-0.5)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_Waterleveltoplot.txt
+
+		#Defne the alert level zone
+		awk -v var="$p90" '{if(NR==1){printf("%s\t%f\n",$1,var)}}' WL-Forecast-${Loc}-${site}.txt >${Loc}_${site}_Yellow.txt
+		awk -v var="$p90" '{x=$1;y=$3}END{printf("%s\t%f\n",x,var)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Yellow.txt
+		awk -v var="$p95" '{x=$1;y=$3}END{printf("%s\t%f\n",x,var)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Yellow.txt
+		awk -v var="$p95" '{if(NR==1){printf("%s\t%f\n",$1,var)}}' WL-Forecast-${Loc}-${site}.txt>>${Loc}_${site}_Yellow.txt
+
+		awk -v var="$p95" '{if(NR==1){printf("%s\t%f\n",$1,var)}}' WL-Forecast-${Loc}-${site}.txt >${Loc}_${site}_Orange.txt
+		awk -v var="$p95" '{x=$1;y=$3}END{printf("%s\t%f\n",x,var)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Orange.txt
+		awk -v var="$p99" '{x=$1;y=$3}END{printf("%s\t%f\n",x,var)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Orange.txt
+		awk -v var="$p99" '{if(NR==1){printf("%s\t%f\n",$1,var)}}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Orange.txt
+
+		awk -v var="$p99" '{if(NR==1){printf("%s\t%f\n",$1,var)}}' WL-Forecast-${Loc}-${site}.txt >${Loc}_${site}_Red.txt
+		awk -v var="$p99" '{x=$1;y=$3}END{printf("%s\t%f\n",x,var)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Red.txt
+		awk '{x=$1;y=$3}END{printf("%s\t%f\n",x,5.0)}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Red.txt
+		awk '{if(NR==1){printf("%s\t%f\n",$1,5.0)}}' WL-Forecast-${Loc}-${site}.txt >>${Loc}_${site}_Red.txt
+
+
+		#Plot day and nights
+		psxy ${regionFJdSun} $proj daysnights.txt -G220 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm:ss  -K -Y10>$psout
+
+		#overlay Warning zones
+		# HD2021 -  Regions not hard wired anymore but depending on sites
+		psxy  ${regionFJdHs} $proj ${Loc}_${site}_Yellow.txt -Gyellow@60 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm  -K -O -t60 >>$psout
+		psxy  ${regionFJdHs} $proj ${Loc}_${site}_Orange.txt -Gorange@60 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm  -K -O -t60 >>$psout
+		psxy  ${regionFJdHs} $proj ${Loc}_${site}_Red.txt -Gred@60 --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm  -K -O -t60 >>$psout
+
+		psbasemap ${regionFJdHs} $proj -Bsa1K/0s -Bpa12hf3hg12h/a0.5f0.1g:"Water Level [m above msl]":1WSen --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --FORMAT_DATE_MAP="mm-dd" --FORMAT_TIME_SECONDARY_MAP=abbreviated --FORMAT_TIME_PRIMARY_MAP=abbreviated --MAP_GRID_PEN_PRIMARY=0.5p,170 --MAP_GRID_PEN_SECONDARY=0.1p,170 -O -K >>$psout
+		psbasemap ${regionFJdHs} $proj -Bsa1Rg3h/g1S --MAP_ANNOT_OFFSET_SECONDARY=17p --FONT_ANNOT_PRIMARY=10p,Helvetica,black --FONT_LABEL=10p,Helvetica,black --FONT_ANNOT_SECONDARY=10p,Helvetica,black --FORMAT_DATE_MAP="mm-dd" --FORMAT_TIME_SECONDARY_MAP=abbreviated --FORMAT_TIME_PRIMARY_MAP=abbreviated --MAP_GRID_PEN_PRIMARY=0.5p,200 --MAP_GRID_PEN_SECONDARY=0.1p,200 --FORMAT_DATE_IN=yyyymmdd --FORMAT_CLOCK_IN=hhmmss -K -O >>$psout
+
+		#Plot the blue shading (zs max)
+		psxy ${Loc}_Waterleveltoplot.txt $regionFJdHs $proj -G57/176/221@60 -L --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm:ss -O -K -t60 >>$psout
+
+
+		#Plot the dashline (predicted tide offshore)
+		awk '{printf("%s\t%f\n",$1,$2)}' WL-Forecast-${Loc}-${site}.txt | psxy $regionFJdHs $proj -W0.5p,black,'-' --FORMAT_DATE_IN=yyyy-mm-dd --FORMAT_CLOCK_IN=hh:mm:ss -O -K>>$psout
+
+		psxy ${regionFJdHs} $proj -O -T>>$psout
+
+		psconvert -A -P -Tf $psout
+
+		psconvert -A -P -Tg $psout
+
+		cp -f ${Loc}-WL-${site}.pdf $product_path_log/out/$fol/
+		cp -f ${Loc}-WL-${site}.png $product_path_log/out/$fol/
+	done
+
+	######################################### 2D Inundation ############################################################################################
+
+	for site in site1
+	do
+		p99=`awk '{if(NR==1) {printf("%f",$1)}}' perc_${Loc}_max_${site}.txt`
+		#If the forecasted water level passes the treshold, get the params and date/time
+		awk -v var=$p99 '{if($3>var){printf("%f\t%f\t%f\t%f\n",$4,$5,$6,$2)}}' allParam-${Loc}-${site}.txt > RBFformaps-${Loc}-${site}.txt
+		awk -v var=$p99 '{if($3>var){printf("%s\n",$1)}}' allParam-${Loc}-${site}.txt > Mapdates-${Loc}-${site}.txt
+	done
+	
+	## merge dates and params for all sites
+	cat Mapdates-${Loc}-*.txt>Mapdates-${Loc}_temp.txt
+	sort Mapdates-${Loc}_temp.txt | uniq > Mapdates-${Loc}.txt
+	cat RBFformaps-${Loc}-*.txt>RBFformaps-${Loc}_temp.txt
+	sort RBFformaps-${Loc}_temp.txt | uniq > RBFformaps-${Loc}.txt
+	
+	#Create variable to check if there is a need to run the inundation module
+	ninund=`awk 'END{print(NR)}' Mapdates-${Loc}.txt `
+
+	echo $ninund
+	#Inundation check
+	if [ "$ninund" -gt "0" ]
+	then
+
+		cd $working_dir/RBF/${Loc}/inun/
+		cp $working_dir/RBFformaps-${Loc}.txt ./
+		cp $working_dir/Mapdates-${Loc}.txt ./
+		rm ./*zsmaxmaps*nc
+
+		#Loop through each time step with potential inundation
+		for ((step=0; step<${ninund}; step=step+1))
+		do
+			#Create date/time stamp for the inundation
+			datename=$(awk -v line=$step '{if (NR==(line+1)){print($0)}}' Mapdates-${Loc}.txt | awk '{split($0,tp,":");{print tp[1]}}')
+
+			awk -v line=$step '{if (NR==(line+1)){print($0)}}' RBFformaps-${Loc}.txt >RBFtorun.txt
+
+			#prepare input file for RBFmat.exe to generate inundation maps (for flowdepth)
+			echo "#Header" > RBF_param.txt
+			echo "centersfile = ${Loc}_MDA_300.dat;" >> RBF_param.txt
+			echo "RBFcoefffile = ${Loc}_zsmax2D_RBF_coef.nc?3Dvar;" >> RBF_param.txt
+			echo "gammafile = ${Loc}_zsmax2D_RBF_coef.nc?gamma;" >> RBF_param.txt
+			echo "inputfile = RBFtorun.txt;" >> RBF_param.txt
+			echo "trainingfile = MauiBay_Shore_MDA_zs.txt;" >> RBF_param.txt
+			echo "isdir=2;" >> RBF_param.txt
+			echo "trainRBF = 0;" >> RBF_param.txt
+			echo "saveRBFcoeffs = 0;" >> RBF_param.txt
+			echo "interpRBF = 1;" >> RBF_param.txt
+			echo "outputfile = ${Loc}-zsmaxmaps.nc?z;" >> RBF_param.txt
+
+			./RBFmat
+
+			cd $working_dir/RBF/${Loc}/inun/flag
+			cp $working_dir/RBF/${Loc}/inun/RBFtorun.txt ./
+			rm ./*inundFlag*.nc
+
+			#prepare input file for RBFmat.exe to generate inundation maps (for inundation flag)
+			echo "#Header" > RBF_param.txt
+			echo "gamma = 0.2672;" >> RBF_param.txt
+			echo "centersfile = ${Loc}_MDA_300.dat;" >> RBF_param.txt
+			echo "RBFcoefffile = ${Loc}_Grid_Inund2D_RBF_coef.nc?3Dvar;" >> RBF_param.txt
+			echo "gammafile = ${Loc}_Grid_Inund2D_RBF_coef.nc?gamma;" >> RBF_param.txt
+			echo "inputfile = RBFtorun.txt;" >> RBF_param.txt
+			echo "trainingfile = MauiBay_Shore_MDA_zs.txt;" >> RBF_param.txt
+			echo "isdir=2;" >> RBF_param.txt
+			echo "trainRBF = 0;" >> RBF_param.txt
+			echo "saveRBFcoeffs = 0;" >> RBF_param.txt
+			echo "interpRBF = 1;" >> RBF_param.txt
+			echo "outputfile = ${Loc}-inundFlag.nc?z;" >> RBF_param.txt
+
+			./RBFmat
+			cp ./${Loc}-inundFlag.nc $working_dir/RBF/${Loc}/inun/
+			cd $working_dir/RBF/${Loc}/inun
+
+			zsmaxfile=${Loc}-zsmaxmaps.nc?z[0]
+			inundfile=${Loc}-inundFlag.nc?z[0]
+
+			grdconvert ${zsmaxfile}=gd zsmax.nc
+			grdconvert ${inundfile}=gd inund.nc
+
+			#RBF was trained on a cropped domain. We extend the domain here back to original
+			grd2xyz inund.nc >${Loc}-inundFlag.xyz
+			grd2xyz zsmax.nc >${loc}-inundpth.xyz
+			#Fill the new runup value from ${dom} into the full grid
+			cp inundFlag_template.nc ./inund.nc
+			cp inundFlag_template.nc ./zsmax.nc
+			grdedit inund.nc -N${Loc}-inundFlag.xyz
+			grdedit zsmax.nc -N${loc}-inundpth.xyz
+
+			grdmath MDA_SIM_001.nc?zb -1.0 MUL 0.011 ADD = zsdry.nc
+			grdmath zsdry.nc 1.0 GT = land.nc
+
+			#HD: warning with the below. (0.4) Could be adjusted further
+			grdmath inund.nc 0.4 GE = inundcheck.nc
+
+			grdmath zsmax.nc zsdry.nc GT inundcheck.nc MUL land.nc MUL = wet.nc
+			grdmath wet.nc 0.0 NAN = wetNaN.nc
+
+			grdmath zsmax.nc zsdry.nc SUB wetNaN.nc MUL = Runup_${Loc}_${datename}.nc
+
+			#Georectify the grid
+			#Rotate -90 degree
+			grdedit Runup_${Loc}_${datename}.nc -El -Grot90_Runup_${Loc}_${datename}.nc
+			#Shift to easting northing position
+			region=-R569315/572190/7985650/7987405
+			grdedit rot90_Runup_${Loc}_${datename}.nc $region -GRunup_${Loc}_${datename}_shift.nc
+			#Rotate by 15 degrees
+			grd2xyz Runup_${Loc}_${datename}_shift.nc > Runup_${Loc}_${datename}_shift.xyz
+			awk 'BEGIN{xo=569315;yo=7985650; a=15}{alpha=a*3.14/180;xp=$1-xo; yp=$2-yo; i=yp*sin(alpha)+xp*cos(alpha)+xo; j=yp*cos(alpha)-xp*sin(alpha)+yo; print(i,j,$3)}' Runup_${Loc}_${datename}_shift.xyz > Runup_${Loc}_${datename}_rot15.xyz
+
+			#get the new bounding box
+			xmin1=$(awk '(NR==1){Min=$1};(NR>=2){if(Min>$1) Min=$1} END {printf "%f",Min}' Runup_${Loc}_${datename}_rot15.xyz)
+			xmax1=$(awk '(NR==1){Max=$1};(NR>=2){if(Max<$1) Max=$1} END {printf "%f",Max}' Runup_${Loc}_${datename}_rot15.xyz)
+			ymin1=$(awk '(NR==1){Min=$2};(NR>=2){if(Min>$2) Min=$2} END {printf "%f",Min}' Runup_${Loc}_${datename}_rot15.xyz)
+			ymax1=$(awk '(NR==1){Max=$2};(NR>=2){if(Max<$2) Max=$2} END {printf "%f",Max}' Runup_${Loc}_${datename}_rot15.xyz)
+
+			#Interpolate the rotated runup value onto the new grid
+			region=-R${xmin1}/${xmax1}/${ymin1}/${ymax1}
+			blockmean Runup_${Loc}_${datename}_rot15.xyz $region -I10 >Runup_${Loc}_${datename}_rot15_blockmean.xyz
+			surface Runup_${Loc}_${datename}_rot15_blockmean.xyz $region -I10 -M0c -GRunup_${Loc}_${datename}_rot15_blockmean.nc
+			# Last adjustment
+			xtrans=0
+			ytrans=745
+			xmin=$(echo "$xmin1 + $xtrans" | bc)
+			xmax=$(echo "$xmax1 + $xtrans" | bc)
+			ymin=$(echo "$ymin1 + $ytrans" | bc)
+			ymax=$(echo "$ymax1 + $ytrans" | bc)
+
+			region1=-R${xmin}/${xmax}/${ymin}/${ymax}
+
+			grdedit Runup_${Loc}_${datename}_rot15_blockmean.nc $region1 -GRunup_${Loc}_${datename}_georefUTM.nc
+			#Convert in lat/lon
+			grdproject Runup_${Loc}_${datename}_georefUTM.nc -Ju-60/1:1 -I -C -F -GRunup_${Loc}_${datename}_georef.nc
+			#format netcdf for Geoserver
+			python format_nc.py -i Runup_${Loc}_${datename}_georef.nc -o Runup_${Loc}_${datename}_georef_format.nc
+			#Non Value get mixed up with Python Netcdf4/Numpy. We fix the issue through GMT
+			#grdmath Runup_${Loc}_${datename}_georef_format.nc 1000 GE 1 NAN 1 ADD Runup_${Loc}_${datename}_georef_format.nc MUL = Runup_${Loc}_${datename}_final.nc
+			cp -f Runup_${Loc}_${datename}_georef_format.nc $product_path_log/out/$fol/Runup_${Loc}_${datename}_final.nc
+		done
+	fi
+done

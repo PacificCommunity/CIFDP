@@ -1,0 +1,109 @@
+#!/bin/bash
+###########################################################################
+## Project Background:                                                   ##
+## Title: CIFDP - Swell inundation forecast system for the Coral Coast   ##
+## Funding source: Korea                                                 ##
+## Managing agency: WMO                                                  ##
+## Implementation agency: SPC                                            ##
+###########################################################################
+## Authors: Cyprien Bosserelle, (updated by Herve Damlamian)             ##
+## Release: April,2021                                                   ##
+## Organisation: Pacific Community (SPC), GEM Division                   ##
+###########################################################################
+## Description:                                                          ##
+## PlotMapsHs                                                            ##
+##      1) create 2D Wave heigh figures                                  ##
+##      2) Make a gif animation for communication purposes               ##
+##Note that this plotting script is based on GMT ........................##
+###########################################################################
+
+#create color scale
+makecpt -T0/4/0.2 -D -M -Cseminf-haxby.cpt >Hscolor.cpt
+product_path_log=`awk -F'[<>]' '/ProductOutPath/ {print $3}' config_path.xml`
+working_dir=`awk -F'[<>]' '/workingpath/ {print $3}' config_working.xml`
+#output folder
+fol=$(awk '{if(NR==3) {split($1,time,"/");printf("%s",substr(time[1],1,15))}}' Lastcycle.txt)
+# Define our inputs for mapping (Wave height and Direction)
+fileHs=forecast_model.nc?Hs
+fileDp=forecast_model.nc?Dp
+#Define the region to plot in geographical coordinate
+region=-R176.73/178.869/-19.33/-17.731
+#define projection and scale
+proj=-JM15c
+
+for var in Hs
+do
+	for ttt in $(seq 1 3 178) #1 13 25 37 49 61 73 85 97 109 121 133 145 157 169
+	do
+		cd $product_path_log/out/$fol/
+		#some formatting... grdmath tend to fail inexplicably after few runs. Switching to grdconvert
+		#grdmath "${fileHs}[${ttt}]" 1 MUL = out_${var}.nc
+		#grdmath "${fileDp}[${ttt}]" 1 MUL = out_Dp.nc
+		grdconvert "${fileHs}[${ttt}]" out_${var}.nc
+		grdconvert "${fileDp}[${ttt}]" out_Dp.nc
+		grdedit out_${var}.nc $region -T
+		grdedit out_Dp.nc $region -T
+		
+		mv ./out_${var}.nc $working_dir
+		mv ./out_Dp.nc $working_dir
+		
+		cd $working_dir/
+		
+		
+		#need this to remove round off error in Land-Nan
+		grdsample Land-Nan.nc -Rout_${var}.nc -GLand-Nan_resampled.nc
+		#Mask land area
+		grdmath out_${var}.nc Land-Nan_resampled.nc MUL = toplot1.nc
+		#define output figure names
+		iform=`printf "%3.3i" $ttt`
+		outps=${var}_${iform}.ps
+		outpng=${var}_${iform}.png
+		#create basemap for plotting
+		psbasemap $region $proj --MAP_FRAME_TYPE=plain --FONT_ANNOT_PRIMARY=10p,Helvetica,black -Ba0.5f0.1WSen -K > $outps
+		#Overlay the 2D Hs grid
+		grdview $region $proj toplot1.nc -C${var}color.cpt -Qs -O -K >> $outps
+		
+		#transform Direction into arrows
+		grdsample out_Dp.nc $region -I0.05 -GdirFD.nc
+		grdmath dirFD.nc 0.0 AND = dirFDAND.nc
+		grdmath dirFDAND.nc 0.0 MUL 1.0 ADD = VeldirFDAND.nc
+		grd2xyz dirFDAND.nc > dp_resampled.txt
+		#plot the arrows as wave direction
+		awk '{print($1,$2,$3,0.3)}' dp_resampled.txt |psxy $region $proj -G0 -SV3p+b -W0.5p,black -O -K >> $outps
+		
+		#add relief topo and contour for shallow water
+		grdimage $region $proj Bathy_NOSEA.nc -CWheat_land.cpt -IGradient_Fj_Nan.nc -Q -O -K >> $outps
+		grdcontour $region $proj bathy_fiji.nc -C+0  -Wc0.2p,00/00/00 -O -K >> $outps
+		grdcontour $region $proj bathy_fiji.nc -C+1.5  -Wc0.2p,00/00/00,"-" -O -K >> $outps
+		
+		# Add location on map
+		echo "177.433767,-17.772513 Nadi" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.2c/-0.15c -O -K>>$outps
+		echo "178.441794,-18.097980 Suva" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps
+		echo "177.502246,-18.138963 Sigatoka" | pstext $region $proj -F+a0-0+f7p,Helvetica,black+jMC -D0.0c/0.0c -O -K>>$outps
+		echo "178.177679,-18.215958 Navua" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.45c/-0.1c -O -K>>$outps
+		echo "178.109877,-18.391847 Beqa" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.8c/-0.3c -O -K>>$outps
+		echo "177.610555,-18.521345 Vatulele" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D-0.5c/0.0c -O -K>>$outps
+		echo "178.297961,-18.980413 Kadavu" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -D0.4c/0.0c -O -K>>$outps
+		echo "178.546730,-18.011885 Nausori" | pstext $region $proj -F+a-0+f7p,Helvetica,black+jMC -O -K>>$outps
+		echo "178.0,-17.800 Swell Height [m]" | pstext $region $proj -F+a-0+f12p,Helvetica,black+jMC -O -K>>$outps
+		echo "178.1,-17.900 Last update:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+		
+		# Add forecast time on map
+		awk '{if(NR==2){print(178.1,-17.9700,$0)}}' Lastcycle.txt | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+		dstr=`awk -v tt=$ttt '{if(NR==2){printf("%s + %s hours",$0,tt-1)}}' Lastcycle.txt`
+		dstrformated=`date +"%a %d %b %H:00FJT" -d"${dstr}"`
+		echo "177.4,-17.900 Forecast time:" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+		echo "177.4,-17.970 ${dstrformated}" | pstext $region $proj -F+f12p,Helvetica,black+jLM -O -K>>$outps
+		psscale -Dx15.1c/4c/6c/0.3c -C${var}color.cpt -Ba1f0.2 -O -K >> $outps
+		psxy $region $proj -T -O >> $outps
+		psconvert -A -P -Tg $outps
+		
+		#Move figures into output folder
+		mv -f ${outpng} $product_path_log/out/$fol/${outpng}
+	done
+done
+
+rm *.ps
+#Create an animated gif
+convert -delay 50 -loop 0 $product_path_log/out/$fol/Hs_*.png $product_path_log/out/$fol/Hs_animated.gif
+rm *.ps
